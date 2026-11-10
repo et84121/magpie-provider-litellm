@@ -35,13 +35,16 @@ Magpie 原生 LiteLLM Proxy Provider 外掛。
 
 ## 安裝方式
 
-Magpie 內建 Bun 執行環境，直接指向本專案原始碼目錄即可載入，無須事先編譯或安裝相依套件：
+Magpie 內建 Bun 執行環境，可直接透過 GitHub 遠端安裝，或指向本機原始碼目錄載入（無須事先編譯）：
 
 ```bash
-# 1. 將本地目錄加入 Magpie
+# 方式 A：直接透過 GitHub 安裝（推薦）
+magpie plugin add github:et84121/magpie-provider-litellm
+
+# 方式 B：本地目錄載入（開發／除錯）
 magpie plugin add /Users/jimmyctchang/Code/magpie-provider-litellm
 
-# 2. 檢視安裝狀態
+# 檢視安裝狀態
 magpie plugin
 ```
 
