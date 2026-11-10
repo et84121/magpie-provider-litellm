@@ -10,6 +10,7 @@ import {
   getApiBase,
   getManagementBase,
   isDecisionModel,
+  isExcludedModel,
   parseLoginInput,
   resolveModelProtocol,
 } from "./protocol.js";
@@ -57,9 +58,15 @@ export const LitellmPlugin = async () => ({
           reasoning: true,
         },
         "gpt-4o": {
-          name: "GPT-4o (Chat Completions)",
-          npm: ModelProtocolPackage.OPENAI_COMPATIBLE,
+          name: "GPT-4o (OpenAI Responses)",
+          npm: ModelProtocolPackage.OPENAI_RESPONSES,
           limit: { context: 128000, output: 4096 },
+          tool_call: true,
+        },
+        "deepseek-chat": {
+          name: "DeepSeek Chat (Chat Completions)",
+          npm: ModelProtocolPackage.OPENAI_COMPATIBLE,
+          limit: { context: 128000, output: 8192 },
           tool_call: true,
         },
         "Decision-1": {
@@ -215,6 +222,11 @@ export const LitellmPlugin = async () => ({
               const modelId = String(item.model_name);
               const info = item.model_info || {};
               const params = item.litellm_params || {};
+
+              // 排除非對話任務模型（如 embedding、image_generation）避免 Agent 誤選崩潰
+              if (isExcludedModel(modelId, item)) {
+                continue;
+              } 
 
               const isDecision = isDecisionModel(modelId, item);
               const protocolNpm = resolveModelProtocol(modelId, item);

@@ -9,6 +9,9 @@ import {
   getManagementBase,
   isClaudeFamily,
   isDecisionModel,
+  isExcludedModel,
+  isOpenAIResponsesFamily,
+  isOpenSourceFamily,
   parseLoginInput,
   resolveModelProtocol,
 } from "../src/protocol.js";
@@ -52,7 +55,7 @@ describe("protocol / parseLoginInput", () => {
   });
 });
 
-describe("protocol / isDecisionModel", () => {
+describe("protocol / isDecisionModel & isExcludedModel", () => {
   it("正確識別 Decision-1 及 evaluation 模式為決策分類模型", () => {
     expect(isDecisionModel("Decision-1")).toBe(true);
     expect(isDecisionModel("decision-classifier")).toBe(true);
@@ -60,27 +63,59 @@ describe("protocol / isDecisionModel", () => {
     expect(isDecisionModel("custom-model", { model_info: { mode: "decisions" } } as any)).toBe(true);
     expect(isDecisionModel("gpt-4o", { model_info: { mode: "chat" } } as any)).toBe(false);
   });
+
+  it("正確識別 embedding 與 image_generation 模型為排除對象", () => {
+    expect(isExcludedModel("text-embedding-3-small", { model_info: { mode: "embedding" } } as any)).toBe(true);
+    expect(isExcludedModel("gpt-image-2", { model_info: { mode: "image_generation" } } as any)).toBe(true);
+    expect(isExcludedModel("deepseek-chat", { model_info: { mode: "chat" } } as any)).toBe(false);
+  });
 });
 
-describe("protocol / resolveModelProtocol", () => {
-  it("識別 Claude 系列模型走 Anthropic Messages 協定", () => {
+describe("protocol / resolveModelProtocol (三位一體協定劃分)", () => {
+  it("Claude 族系走 Anthropic Messages 協定 (/v1/messages)", () => {
     expect(resolveModelProtocol("claude-3-7-sonnet")).toBe(ModelProtocolPackage.ANTHROPIC);
     expect(resolveModelProtocol("claude-3-5-haiku-20241022")).toBe(ModelProtocolPackage.ANTHROPIC);
     expect(resolveModelProtocol("my-sonnet")).toBe(ModelProtocolPackage.ANTHROPIC);
     expect(resolveModelProtocol("opus-latest")).toBe(ModelProtocolPackage.ANTHROPIC);
 
-    const itemWithProvider = {
-      model_info: { litellm_provider: "anthropic" },
+    const item = { model_info: { litellm_provider: "anthropic" } };
+    expect(resolveModelProtocol("custom-routed-model", item as any)).toBe(ModelProtocolPackage.ANTHROPIC);
+  });
+
+  it("OpenAI 新架構模型走原生 Responses 協定 (/v1/responses)", () => {
+    expect(resolveModelProtocol("gpt-4o")).toBe(ModelProtocolPackage.OPENAI_RESPONSES);
+    expect(resolveModelProtocol("gpt-4o-mini")).toBe(ModelProtocolPackage.OPENAI_RESPONSES);
+    expect(resolveModelProtocol("o1")).toBe(ModelProtocolPackage.OPENAI_RESPONSES);
+    expect(resolveModelProtocol("o1-mini")).toBe(ModelProtocolPackage.OPENAI_RESPONSES);
+    expect(resolveModelProtocol("o3-mini")).toBe(ModelProtocolPackage.OPENAI_RESPONSES);
+    expect(resolveModelProtocol("gpt-5.6-sol")).toBe(ModelProtocolPackage.OPENAI_RESPONSES);
+    expect(resolveModelProtocol("gpt-6-luna")).toBe(ModelProtocolPackage.OPENAI_RESPONSES);
+    expect(resolveModelProtocol("gpt-chat-latest")).toBe(ModelProtocolPackage.OPENAI_RESPONSES);
+
+    // 透過 supported_endpoints 明確包含 responses
+    const itemWithResponses = {
+      model_info: { supported_endpoints: ["/v1/chat/completions", "/v1/responses"] },
     };
-    expect(resolveModelProtocol("custom-routed-model", itemWithProvider as any)).toBe(
-      ModelProtocolPackage.ANTHROPIC,
+    expect(resolveModelProtocol("custom-azure-gpt", itemWithResponses as any)).toBe(
+      ModelProtocolPackage.OPENAI_RESPONSES,
     );
   });
 
-  it("識別非 Claude 模型走 OpenAI-compatible Chat Completions 協定", () => {
-    expect(resolveModelProtocol("deepseek-chat")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
-    expect(resolveModelProtocol("gpt-4o")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+  it("開源系與第三方模型強制走 Chat Completions 協定 (/v1/chat/completions)", () => {
+    expect(resolveModelProtocol("deepseek-v4-pro")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+    expect(resolveModelProtocol("DeepSeek-V4.1-Flash-1017")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+    expect(resolveModelProtocol("kimi-k2.6")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+    expect(resolveModelProtocol("Kimi-K3.1-Pro")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+    expect(resolveModelProtocol("GLM-5.3")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+    expect(resolveModelProtocol("GLM-5.3-Flash")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
     expect(resolveModelProtocol("qwen-2.5-coder")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
-    expect(resolveModelProtocol("moonshot-v1-auto")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+    expect(resolveModelProtocol("MiniMax-M3")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+    expect(resolveModelProtocol("Nemotron-Lightning-3.5-30B-A3B")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+    expect(resolveModelProtocol("grok-4.7")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+    expect(resolveModelProtocol("llama-3.3-70b")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+
+    // 傳統舊版 OpenAI 模型走 Chat Completions
+    expect(resolveModelProtocol("gpt-3.5-turbo")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+    expect(resolveModelProtocol("gpt-4")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
   });
 });
