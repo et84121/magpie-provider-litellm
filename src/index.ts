@@ -65,15 +65,16 @@ export const LitellmPlugin = async () => ({
     methods: [
       {
         type: "api",
-        label: "LiteLLM Proxy",
-        placeholder: "sk-... 或 https://host sk-...",
+        label: "LiteLLM API Key",
+        placeholder: "sk-...",
         prompts: [
           {
             type: "text",
             key: "baseURL",
-            message: "LiteLLM Base URL (例: http://127.0.0.1:4000 或 https://litellm.internal)",
+            message: "LiteLLM Base URL",
             placeholder: "http://127.0.0.1:4000",
             validate: (v: string) => {
+              if (!v || !v.trim()) return undefined; // 允許留空使用預設值
               try {
                 new URL(v.trim());
                 return undefined;
@@ -82,79 +83,10 @@ export const LitellmPlugin = async () => ({
               }
             },
           },
-          {
-            type: "password",
-            key: "apiKey",
-            message: "LiteLLM API Key (Virtual Key 或 Master Key)",
-            placeholder: "sk-...",
-            validate: (v: string) => (v && v.trim().length > 0 ? undefined : "API Key 不得為空"),
-          },
         ],
-        async authorize(inputs: any) {
-          // 支援三種輸入來源：
-          // 1. GUI 單一輸入框傳入純字串（可含 URL + Key 複合格式）
-          // 2. GUI 單一輸入框傳入 { key: "..." } 或 { apiKey: "..." }
-          // 3. CLI prompts 傳入 { baseURL: "...", apiKey: "..." }
-          let rawKey = "";
-          let rawBase = "";
-
-          if (typeof inputs === "string") {
-            const parsed = parseLoginInput(inputs);
-            rawBase = parsed.baseURL;
-            rawKey = parsed.apiKey;
-          } else if (inputs && typeof inputs === "object") {
-            if (inputs.baseURL && inputs.apiKey && !inputs.apiKey.includes("http")) {
-              rawBase = inputs.baseURL;
-              rawKey = inputs.apiKey;
-            } else {
-              const candidate = inputs.apiKey || inputs.key || "";
-              const parsed = parseLoginInput(candidate, inputs.baseURL);
-              rawBase = parsed.baseURL;
-              rawKey = parsed.apiKey;
-            }
-          }
-
-          if (!rawKey) {
-            return { type: "failed", error: "請輸入有效的 LiteLLM API Key" };
-          }
-
-          const rootUrl = getManagementBase(rawBase);
-          const apiKey = rawKey.trim();
-
-          let accountId = cleanUrl(rawBase).replace(/^https?:\/\//, "");
-          let keyName = "LiteLLM Key";
-
-          try {
-            const signal = createTimeoutSignal();
-            const res = await fetch(`${rootUrl}/key/info`, {
-              headers: { Authorization: `Bearer ${apiKey}` },
-              signal,
-            });
-
-            if (res.ok) {
-              const data = (await res.json()) as LiteLLMKeyInfoResponse;
-              const info = data?.info;
-              if (info) {
-                keyName = info.key_name || keyName;
-                accountId = info.user_id ? `${info.user_id}@${accountId}` : (info.key_name ?? accountId);
-              }
-            } else if (res.status === 401 || res.status === 403) {
-              return { type: "failed", error: `LiteLLM 認證失敗 (HTTP ${res.status}): API Key 無效` };
-            }
-          } catch (err: any) {
-            return { type: "failed", error: `無法連線至 LiteLLM (${rootUrl}): ${err.message}` };
-          }
-
-          return {
-            type: "success",
-            key: apiKey,
-            metadata: {
-              baseURL: cleanUrl(rawBase),
-              keyName,
-            },
-            accountId,
-          };
-        },
+        // 不宣告 authorize 函式：
+        // 依據 Magpie 規範，Magpie 會將 prompts 回答存入 metadata，
+        // 並將使用者在原生輸入框填寫的密鑰存入 key ({ type: "api", key, metadata: { baseURL } })
       },
     ],
 
@@ -165,8 +97,17 @@ export const LitellmPlugin = async () => ({
       const auth = await getAuth();
       if (!auth) return {};
 
-      const baseURL = getApiBase(auth.metadata?.baseURL || "http://127.0.0.1:4000");
-      const apiKey = auth.key;
+      // 若使用者在 key 欄位不小心貼上了包含 URL 的複合格式，自動解析兼顧
+      let rawBase = auth.metadata?.baseURL || "http://127.0.0.1:4000";
+      let apiKey = auth.key;
+
+      if (apiKey && apiKey.includes("http")) {
+        const parsed = parseLoginInput(apiKey, rawBase);
+        rawBase = parsed.baseURL;
+        apiKey = parsed.apiKey;
+      }
+
+      const baseURL = getApiBase(rawBase);
 
       return {
         baseURL,
@@ -212,11 +153,19 @@ export const LitellmPlugin = async () => ({
       const auth = await getAuth();
       if (!auth?.key) return { windows: [] };
 
-      const rootUrl = getManagementBase(auth.metadata?.baseURL || "http://127.0.0.1:4000");
+      let rawBase = auth.metadata?.baseURL || "http://127.0.0.1:4000";
+      let apiKey = auth.key;
+      if (apiKey && apiKey.includes("http")) {
+        const parsed = parseLoginInput(apiKey, rawBase);
+        rawBase = parsed.baseURL;
+        apiKey = parsed.apiKey;
+      }
+
+      const rootUrl = getManagementBase(rawBase);
       try {
         const signal = createTimeoutSignal();
         const res = await fetch(`${rootUrl}/key/info`, {
-          headers: { Authorization: `Bearer ${auth.key}` },
+          headers: { Authorization: `Bearer ${apiKey}` },
           signal,
         });
 
@@ -271,10 +220,17 @@ export const LitellmPlugin = async () => ({
     async models(provider: any, { auth }: { auth?: MagpieStoredAuth } = {}) {
       if (!auth?.key) return provider.models;
 
-      const rawBase = auth.metadata?.baseURL || "http://127.0.0.1:4000";
+      let rawBase = auth.metadata?.baseURL || "http://127.0.0.1:4000";
+      let apiKey = auth.key;
+      if (apiKey && apiKey.includes("http")) {
+        const parsed = parseLoginInput(apiKey, rawBase);
+        rawBase = parsed.baseURL;
+        apiKey = parsed.apiKey;
+      }
+
       const rootUrl = getManagementBase(rawBase);
       const apiBase = getApiBase(rawBase);
-      const headers = { Authorization: `Bearer ${auth.key}` };
+      const headers = { Authorization: `Bearer ${apiKey}` };
 
       try {
         const signal = createTimeoutSignal();
