@@ -79,6 +79,23 @@ export function isClaudeFamily(modelId: string, item?: LiteLLMModelInfoEntry): b
 }
 
 /**
+ * 判斷模型是否為決策／分類評估模型（例如 Decision-1、mode 為 evaluation 或 decisions）
+ * 此類模型對應 Magpie System One 規範，專供意圖路由與分類器使用，不可作為一般聊天對話模型
+ */
+export function isDecisionModel(modelId: string, item?: LiteLLMModelInfoEntry): boolean {
+  const lowerId = modelId.toLowerCase();
+  const mode = (item?.model_info?.mode || "").toLowerCase();
+  const baseModel = (item?.model_info?.base_model || "").toLowerCase();
+
+  return (
+    mode === "evaluation" ||
+    mode === "decisions" ||
+    lowerId.includes("decision") ||
+    baseModel.includes("decision")
+  );
+}
+
+/**
  * 依據模型名稱與 LiteLLM 後端資訊，決定應發配的原生通訊協定
  */
 export function resolveModelProtocol(modelId: string, item?: LiteLLMModelInfoEntry): ModelProtocolPackage {

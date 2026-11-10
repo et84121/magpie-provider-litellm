@@ -8,6 +8,7 @@ import {
   getApiBase,
   getManagementBase,
   isClaudeFamily,
+  isDecisionModel,
   parseLoginInput,
   resolveModelProtocol,
 } from "../src/protocol.js";
@@ -48,6 +49,16 @@ describe("protocol / parseLoginInput", () => {
     const res = parseLoginInput("sk-123456");
     expect(res.baseURL).toBe("http://127.0.0.1:4000");
     expect(res.apiKey).toBe("sk-123456");
+  });
+});
+
+describe("protocol / isDecisionModel", () => {
+  it("正確識別 Decision-1 及 evaluation 模式為決策分類模型", () => {
+    expect(isDecisionModel("Decision-1")).toBe(true);
+    expect(isDecisionModel("decision-classifier")).toBe(true);
+    expect(isDecisionModel("custom-model", { model_info: { mode: "evaluation" } } as any)).toBe(true);
+    expect(isDecisionModel("custom-model", { model_info: { mode: "decisions" } } as any)).toBe(true);
+    expect(isDecisionModel("gpt-4o", { model_info: { mode: "chat" } } as any)).toBe(false);
   });
 });
 

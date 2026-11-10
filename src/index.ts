@@ -5,7 +5,14 @@
  */
 
 import { queryLiteLLMBudget } from "./budget.js";
-import { cleanUrl, getApiBase, getManagementBase, parseLoginInput, resolveModelProtocol } from "./protocol.js";
+import {
+  cleanUrl,
+  getApiBase,
+  getManagementBase,
+  isDecisionModel,
+  parseLoginInput,
+  resolveModelProtocol,
+} from "./protocol.js";
 import {
   type LiteLLMKeyInfoResponse,
   type LiteLLMModelInfoEntry,
@@ -40,6 +47,7 @@ export const LitellmPlugin = async () => ({
       name: "LiteLLM",
       npm: ModelProtocolPackage.OPENAI_COMPATIBLE,
       api: "http://127.0.0.1:4000/v1",
+      decide: true, // 宣告此 Provider 支援 System One 決策／意圖分類 API
       models: {
         "claude-3-7-sonnet": {
           name: "Claude 3.7 Sonnet (Native Messages)",
@@ -53,6 +61,11 @@ export const LitellmPlugin = async () => ({
           npm: ModelProtocolPackage.OPENAI_COMPATIBLE,
           limit: { context: 128000, output: 4096 },
           tool_call: true,
+        },
+        "Decision-1": {
+          name: "Decision-1 (Intent Classifier)",
+          decides: true, // 標記為決策分類模型，供 Magpie 意圖路由使用，不對 Agent 暴露一般對話
+          limit: { context: 32768, output: 4096 },
         },
       },
     };
@@ -203,15 +216,17 @@ export const LitellmPlugin = async () => ({
               const info = item.model_info || {};
               const params = item.litellm_params || {};
 
+              const isDecision = isDecisionModel(modelId, item);
               const protocolNpm = resolveModelProtocol(modelId, item);
               const contextLimit = info.max_input_tokens || info.max_tokens || 128000;
               const outputLimit = info.max_output_tokens || 4096;
-              const hasTools = info.supports_function_calling !== false;
-              const hasVision = info.supports_vision === true;
+              const hasTools = !isDecision && info.supports_function_calling !== false;
+              const hasVision = !isDecision && info.supports_vision === true;
               const isReasoning =
-                info.mode === "reasoning" ||
-                /o1|o3|r1|deepseek-reasoner/i.test(modelId) ||
-                info.supports_reasoning === true;
+                !isDecision &&
+                (info.mode === "reasoning" ||
+                  /o1|o3|r1|deepseek-reasoner/i.test(modelId) ||
+                  info.supports_reasoning === true);
 
               let cost: any = undefined;
               if (typeof info.input_cost_per_token === "number" || typeof info.output_cost_per_token === "number") {
@@ -224,6 +239,7 @@ export const LitellmPlugin = async () => ({
               mapped[modelId] = {
                 id: modelId,
                 name: modelId,
+                ...(isDecision ? { decides: true } : {}),
                 api: {
                   id: params.model || modelId,
                   url: apiBase,
