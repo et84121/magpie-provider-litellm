@@ -4,6 +4,7 @@
  * 支援原生協定路由、動態模型探索、用量預算監控與雙重認證標頭補全。
  */
 
+import { queryLiteLLMBudget } from "./budget.js";
 import { cleanUrl, getApiBase, getManagementBase, parseLoginInput, resolveModelProtocol } from "./protocol.js";
 import {
   type LiteLLMKeyInfoResponse,
@@ -147,7 +148,7 @@ export const LitellmPlugin = async () => ({
     },
 
     /**
-     * Magpie 專屬用量與預算監控
+     * Magpie 專屬用量與預算監控（支援 Key -> User 多層級探索與進度視窗）
      */
     async usage(getAuth: () => Promise<MagpieStoredAuth | undefined>): Promise<MagpieUsageResponse> {
       const auth = await getAuth();
@@ -161,54 +162,8 @@ export const LitellmPlugin = async () => ({
         apiKey = parsed.apiKey;
       }
 
-      const rootUrl = getManagementBase(rawBase);
-      try {
-        const signal = createTimeoutSignal();
-        const res = await fetch(`${rootUrl}/key/info`, {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          signal,
-        });
-
-        if (!res.ok) return { plan: "LiteLLM", windows: [] };
-
-        const data = (await res.json()) as LiteLLMKeyInfoResponse;
-        const info = data?.info;
-        if (!info) return { plan: "LiteLLM", windows: [] };
-
-        const spend = typeof info.spend === "number" ? info.spend : 0;
-        const maxBudget = typeof info.max_budget === "number" && info.max_budget > 0 ? info.max_budget : null;
-        const resetAt = info.budget_reset_at ? new Date(info.budget_reset_at).toISOString() : undefined;
-
-        if (maxBudget) {
-          const usedPercent = Math.min(100, Math.round((spend / maxBudget) * 100));
-          const remaining = Math.max(0, maxBudget - spend);
-          return {
-            plan: "LiteLLM Proxy",
-            user: info.user_id || info.key_name || auth.accountId,
-            balance: `$${remaining.toFixed(2)}`,
-            windows: [
-              {
-                name: "Budget",
-                used: usedPercent,
-                amount: Number(spend.toFixed(2)),
-                limit: Number(maxBudget.toFixed(2)),
-                unit: "USD",
-                display: `$${spend.toFixed(2)} / $${maxBudget.toFixed(2)}`,
-                resetsAt: resetAt,
-              },
-            ],
-          };
-        }
-
-        return {
-          plan: "LiteLLM Proxy",
-          user: info.user_id || info.key_name || auth.accountId,
-          balance: `$${spend.toFixed(2)} spent`,
-          windows: [],
-        };
-      } catch {
-        return { plan: "LiteLLM", windows: [] };
-      }
+      const signal = createTimeoutSignal();
+      return queryLiteLLMBudget(rawBase, apiKey, signal);
     },
   },
 
