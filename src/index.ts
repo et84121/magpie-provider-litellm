@@ -4,7 +4,7 @@
  * 支援原生協定路由、動態模型探索、用量預算監控與雙重認證標頭補全。
  */
 
-import { cleanUrl, getApiBase, getManagementBase, resolveModelProtocol } from "./protocol.js";
+import { cleanUrl, getApiBase, getManagementBase, parseLoginInput, resolveModelProtocol } from "./protocol.js";
 import {
   type LiteLLMKeyInfoResponse,
   type LiteLLMModelInfoEntry,
@@ -66,6 +66,7 @@ export const LitellmPlugin = async () => ({
       {
         type: "api",
         label: "LiteLLM Proxy",
+        placeholder: "sk-... 或 https://host sk-...",
         prompts: [
           {
             type: "text",
@@ -89,11 +90,38 @@ export const LitellmPlugin = async () => ({
             validate: (v: string) => (v && v.trim().length > 0 ? undefined : "API Key 不得為空"),
           },
         ],
-        async authorize(inputs: { baseURL: string; apiKey: string }) {
-          const rootUrl = getManagementBase(inputs.baseURL);
-          const apiKey = inputs.apiKey.trim();
+        async authorize(inputs: any) {
+          // 支援三種輸入來源：
+          // 1. GUI 單一輸入框傳入純字串（可含 URL + Key 複合格式）
+          // 2. GUI 單一輸入框傳入 { key: "..." } 或 { apiKey: "..." }
+          // 3. CLI prompts 傳入 { baseURL: "...", apiKey: "..." }
+          let rawKey = "";
+          let rawBase = "";
 
-          let accountId = cleanUrl(inputs.baseURL).replace(/^https?:\/\//, "");
+          if (typeof inputs === "string") {
+            const parsed = parseLoginInput(inputs);
+            rawBase = parsed.baseURL;
+            rawKey = parsed.apiKey;
+          } else if (inputs && typeof inputs === "object") {
+            if (inputs.baseURL && inputs.apiKey && !inputs.apiKey.includes("http")) {
+              rawBase = inputs.baseURL;
+              rawKey = inputs.apiKey;
+            } else {
+              const candidate = inputs.apiKey || inputs.key || "";
+              const parsed = parseLoginInput(candidate, inputs.baseURL);
+              rawBase = parsed.baseURL;
+              rawKey = parsed.apiKey;
+            }
+          }
+
+          if (!rawKey) {
+            return { type: "failed", error: "請輸入有效的 LiteLLM API Key" };
+          }
+
+          const rootUrl = getManagementBase(rawBase);
+          const apiKey = rawKey.trim();
+
+          let accountId = cleanUrl(rawBase).replace(/^https?:\/\//, "");
           let keyName = "LiteLLM Key";
 
           try {
@@ -114,14 +142,14 @@ export const LitellmPlugin = async () => ({
               return { type: "failed", error: `LiteLLM 認證失敗 (HTTP ${res.status}): API Key 無效` };
             }
           } catch (err: any) {
-            return { type: "failed", error: `無法連線至 LiteLLM: ${err.message}` };
+            return { type: "failed", error: `無法連線至 LiteLLM (${rootUrl}): ${err.message}` };
           }
 
           return {
             type: "success",
             key: apiKey,
             metadata: {
-              baseURL: cleanUrl(inputs.baseURL),
+              baseURL: cleanUrl(rawBase),
               keyName,
             },
             accountId,
@@ -146,16 +174,12 @@ export const LitellmPlugin = async () => ({
         async fetch(input: RequestInfo | URL, init?: RequestInit) {
           const headers = new Headers(init?.headers);
 
-          // 同時注入 Bearer 與 x-api-key：
-          // 確保走 @ai-sdk/anthropic (/v1/messages) 與 @ai-sdk/openai-compatible (/v1/chat/completions)
-          // 都能通過 LiteLLM Proxy 虛擬金鑰檢驗與上游透傳
           if (apiKey) {
             headers.set("authorization", `Bearer ${apiKey}`);
             headers.set("x-api-key", apiKey);
           }
           headers.set("x-litellm-source", "magpie");
 
-          // 若為 Anthropic Messages 請求且缺少版本標頭，補上預設版本避免 upstream 報錯
           const urlString = input.toString();
           if (urlString.includes("/messages") && !headers.has("anthropic-version")) {
             headers.set("anthropic-version", "2023-06-01");
@@ -163,8 +187,6 @@ export const LitellmPlugin = async () => ({
 
           const res = await fetch(input, { ...init, headers });
 
-          // 透過 X-Magpie-Sign-In 通知 Magpie Gateway：
-          // 區分金鑰過期（expired 觸發換號容錯）與特定模型未部署（kept 避免停用有效帳號）
           if (res.status === 401) {
             const clone = res.clone();
             const text = await clone.text().catch(() => "");
@@ -184,7 +206,7 @@ export const LitellmPlugin = async () => ({
     },
 
     /**
-     * Magpie 專屬用量與預算監控（對應 magpie quota 及桌面端 Quota 卡片）
+     * Magpie 專屬用量與預算監控
      */
     async usage(getAuth: () => Promise<MagpieStoredAuth | undefined>): Promise<MagpieUsageResponse> {
       const auth = await getAuth();
@@ -254,7 +276,6 @@ export const LitellmPlugin = async () => ({
       const apiBase = getApiBase(rawBase);
       const headers = { Authorization: `Bearer ${auth.key}` };
 
-      // 步驟 A: 優先向 /model/info 查詢完整 metadata
       try {
         const signal = createTimeoutSignal();
         const infoRes = await fetch(`${rootUrl}/model/info`, { headers, signal });
@@ -271,9 +292,7 @@ export const LitellmPlugin = async () => ({
               const info = item.model_info || {};
               const params = item.litellm_params || {};
 
-              // 動態決定通訊協定（Claude 走原生 Anthropic，其餘走 OpenAI-compatible）
               const protocolNpm = resolveModelProtocol(modelId, item);
-
               const contextLimit = info.max_input_tokens || info.max_tokens || 128000;
               const outputLimit = info.max_output_tokens || 4096;
               const hasTools = info.supports_function_calling !== false;
@@ -319,10 +338,9 @@ export const LitellmPlugin = async () => ({
           }
         }
       } catch {
-        // /model/info 失敗時退回 /v1/models
+        // 失敗退回 /v1/models
       }
 
-      // 步驟 B: 退回標準 /v1/models (僅模型 ID 清單)
       try {
         const signal = createTimeoutSignal();
         const listRes = await fetch(`${apiBase}/models`, { headers, signal });
@@ -362,7 +380,6 @@ export const LitellmPlugin = async () => ({
         // 保留原快取
       }
 
-      // 步驟 C: 均失敗時保留既有 models，不破壞 Magpie 快取
       return provider.models;
     },
   },

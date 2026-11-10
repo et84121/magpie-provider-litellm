@@ -34,6 +34,34 @@ export function getApiBase(url: string): string {
 }
 
 /**
+ * 解析使用者輸入之認證字串
+ *
+ * 支援以下兩種情境：
+ * 1. 複合格式（同時帶網址與金鑰）："https://litellm.internal sk-..." 或 "https://litellm.internal,sk-..."
+ * 2. 純金鑰格式：若只輸入 "sk-..."，則回退使用環境變數 LITELLM_BASE_URL 或本機預設 http://127.0.0.1:4000
+ */
+export function parseLoginInput(
+  raw: string,
+  defaultBase = "http://127.0.0.1:4000",
+): { baseURL: string; apiKey: string } {
+  const text = raw.trim();
+  const splitMatch = text.match(/^(https?:\/\/[^\s,#|]+)[\s,#|]+(.+)$/i);
+
+  if (splitMatch) {
+    return {
+      baseURL: cleanUrl(splitMatch[1]),
+      apiKey: splitMatch[2].trim(),
+    };
+  }
+
+  const envBase = typeof process !== "undefined" ? process.env?.LITELLM_BASE_URL : undefined;
+  return {
+    baseURL: cleanUrl(envBase || defaultBase),
+    apiKey: text,
+  };
+}
+
+/**
  * 判斷模型是否屬於 Claude / Anthropic 族系
  * 依據 LiteLLM 提供的 provider 或 base_model，以及模型名稱關鍵字綜合研判
  * @private
@@ -43,23 +71,15 @@ export function isClaudeFamily(modelId: string, item?: LiteLLMModelInfoEntry): b
   const provider = (item?.model_info?.litellm_provider || item?.litellm_params?.custom_llm_provider || "").toLowerCase();
   const baseModel = (item?.model_info?.base_model || "").toLowerCase();
 
-  // 若 LiteLLM 明確標示後端供應商為 anthropic，或 base_model 具備 claude 特徵
   if (provider === "anthropic" || baseModel.includes("claude") || baseModel.includes("anthropic")) {
     return true;
   }
 
-  // 若無 metadata，則依據公開命名慣例（claude-3-5, sonnet, haiku, opus）識別
   return /(?:^|[./_-])(?:anthropic|claude|opus|sonnet|haiku)(?:$|[./_:-])/i.test(lowerId);
 }
 
 /**
  * 依據模型名稱與 LiteLLM 後端資訊，決定應發配的原生通訊協定
- *
- * 設計考量：
- * 讓 Claude 系列模型直走 @ai-sdk/anthropic（對應 /v1/messages），
- * 能避免 Magpie Gateway 將 Anthropic Messages 轉為 OpenAI Chat 格式、
- * LiteLLM 再轉回 Anthropic 的雙重轉譯損耗，完整保留 Extended Thinking 與 Tool Use 簽名；
- * 其餘開源或通用模型則走標準 @ai-sdk/openai-compatible（對應 /v1/chat/completions）。
  */
 export function resolveModelProtocol(modelId: string, item?: LiteLLMModelInfoEntry): ModelProtocolPackage {
   if (isClaudeFamily(modelId, item)) {

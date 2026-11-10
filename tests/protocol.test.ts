@@ -3,7 +3,14 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { cleanUrl, getApiBase, getManagementBase, isClaudeFamily, resolveModelProtocol } from "../src/protocol.js";
+import {
+  cleanUrl,
+  getApiBase,
+  getManagementBase,
+  isClaudeFamily,
+  parseLoginInput,
+  resolveModelProtocol,
+} from "../src/protocol.js";
 import { ModelProtocolPackage } from "../src/types.js";
 
 describe("protocol / URL helpers", () => {
@@ -24,6 +31,26 @@ describe("protocol / URL helpers", () => {
   });
 });
 
+describe("protocol / parseLoginInput", () => {
+  it("正確解析空白隔開的 URL 與 Key", () => {
+    const res = parseLoginInput("https://litellm.internal sk-123456");
+    expect(res.baseURL).toBe("https://litellm.internal");
+    expect(res.apiKey).toBe("sk-123456");
+  });
+
+  it("正確解析逗號隔開的 URL 與 Key", () => {
+    const res = parseLoginInput("https://litellm.internal,sk-123456");
+    expect(res.baseURL).toBe("https://litellm.internal");
+    expect(res.apiKey).toBe("sk-123456");
+  });
+
+  it("只輸入 Key 時使用預設 Base URL", () => {
+    const res = parseLoginInput("sk-123456");
+    expect(res.baseURL).toBe("http://127.0.0.1:4000");
+    expect(res.apiKey).toBe("sk-123456");
+  });
+});
+
 describe("protocol / resolveModelProtocol", () => {
   it("識別 Claude 系列模型走 Anthropic Messages 協定", () => {
     expect(resolveModelProtocol("claude-3-7-sonnet")).toBe(ModelProtocolPackage.ANTHROPIC);
@@ -31,7 +58,6 @@ describe("protocol / resolveModelProtocol", () => {
     expect(resolveModelProtocol("my-sonnet")).toBe(ModelProtocolPackage.ANTHROPIC);
     expect(resolveModelProtocol("opus-latest")).toBe(ModelProtocolPackage.ANTHROPIC);
 
-    // 透過 LiteLLM metadata 識別
     const itemWithProvider = {
       model_info: { litellm_provider: "anthropic" },
     };
