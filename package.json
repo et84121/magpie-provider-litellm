@@ -1,0 +1,35 @@
+{
+  "name": "magpie-provider-litellm",
+  "version": "0.1.0",
+  "description": "Native LiteLLM proxy provider plugin for Magpie and OpenCode",
+  "type": "module",
+  "main": "./src/index.ts",
+  "files": [
+    "src",
+    "README.md",
+    "package.json"
+  ],
+  "scripts": {
+    "test": "bun test"
+  },
+  "keywords": [
+    "magpie",
+    "magpie-plugin",
+    "opencode",
+    "opencode-plugin",
+    "litellm"
+  ],
+  "license": "MIT",
+  "magpie": {
+    "name": "LiteLLM",
+    "summary": {
+      "en": "Connect to your self-hosted LiteLLM proxy with dynamic model discovery, native protocol routing and budget tracking",
+      "zh": "連接 LiteLLM 代理，支援動態模型探索、原生協定路由與用量預算監控"
+    },
+    "icon": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='2' width='20' height='8' rx='2'/><rect x='2' y='14' width='20' height='8' rx='2'/><line x1='6' y1='6' x2='6.01' y2='6'/><line x1='6' y1='18' x2='6.01' y2='18'/></svg>",
+    "maxConcurrency": 10
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
