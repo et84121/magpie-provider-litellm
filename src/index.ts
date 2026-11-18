@@ -12,8 +12,14 @@ import {
   isDecisionModel,
   isExcludedModel,
   parseLoginInput,
+  knownOutputLimit,
+  resolveContextLimit,
   resolveModelProtocol,
+  resolveOutputLimit,
+  UNKNOWN_CONTEXT_FALLBACK,
+  UNKNOWN_OUTPUT_FALLBACK,
 } from "./protocol.js";
+import { loadCatalog, lookupLimit, type ModelsDevCatalog } from "./limits.js";
 import {
   type LiteLLMKeyInfoResponse,
   type LiteLLMModelInfoEntry,
@@ -23,6 +29,7 @@ import {
 } from "./types.js";
 
 export const PROVIDER_ID = "litellm";
+const CATALOG_CACHE_PATH = `${process.env.HOME ?? "."}/.cache/magpie-provider-litellm/models-dev.json`;
 const DEFAULT_TIMEOUT_MS = 10000;
 
 /**
@@ -217,6 +224,12 @@ export const LitellmPlugin = async () => ({
 
           if (validEntries.length > 0) {
             const mapped: Record<string, any> = {};
+            // 只有某個模型缺少上游明確上限時才需要外部目錄（惰性載入，避免每次探索都讀快取）
+            const needsCatalog = validEntries.some((e) => !e.model_info?.max_input_tokens || !e.model_info?.max_output_tokens);
+            const catalog: ModelsDevCatalog | undefined = needsCatalog
+              ? await loadCatalog(CATALOG_CACHE_PATH).catch(() => undefined)
+              : undefined;
+            const missingLimit: string[] = [];
 
             for (const item of validEntries) {
               const modelId = String(item.model_name);
@@ -230,8 +243,11 @@ export const LitellmPlugin = async () => ({
 
               const isDecision = isDecisionModel(modelId, item);
               const protocolNpm = resolveModelProtocol(modelId, item);
-              const contextLimit = info.max_input_tokens || info.max_tokens || 128000;
-              const outputLimit = info.max_output_tokens || 4096;
+              const external = catalog ? lookupLimit(catalog, params.model || modelId) : undefined;
+              // 與 resolveOutputLimit 的判斷一致：只有真的落到保底時才警告
+              if (knownOutputLimit(info, external?.output) === undefined) missingLimit.push(modelId);
+              const contextLimit = resolveContextLimit(info, external?.context);
+              const outputLimit = resolveOutputLimit(info, external?.output);
               const hasTools = !isDecision && info.supports_function_calling !== false;
               const hasVision = !isDecision && info.supports_vision === true;
               const isReasoning =
@@ -273,6 +289,7 @@ export const LitellmPlugin = async () => ({
               };
             }
 
+            if (missingLimit.length) console.warn(`[magpie-provider-litellm] 無法取得輸出上限，使用保底 ${UNKNOWN_OUTPUT_FALLBACK}：${missingLimit.join(", ")}`);
             return mapped;
           }
         }
@@ -302,8 +319,8 @@ export const LitellmPlugin = async () => ({
                   npm: protocolNpm,
                 },
                 limit: {
-                  context: 128000,
-                  output: 4096,
+                  context: UNKNOWN_CONTEXT_FALLBACK,
+                  output: UNKNOWN_OUTPUT_FALLBACK,
                 },
                 capabilities: {
                   toolcall: true,
