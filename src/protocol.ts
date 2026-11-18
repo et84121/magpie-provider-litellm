@@ -96,6 +96,49 @@ export function isClaudeFamily(modelId: string, item?: LiteLLMModelInfoEntry): b
   return CLAUDE_PATTERN.test(lowerId);
 }
 
+/** 上游與外部目錄都查不到輸出上限時的最後保底值 */
+export const UNKNOWN_OUTPUT_FALLBACK = 4096;
+
+/** 上游與外部目錄都查不到上下文上限時的最後保底值 */
+export const UNKNOWN_CONTEXT_FALLBACK = 128000;
+
+/**
+ * 大於 0 的數字才視為有效值，否則 undefined
+ * @private
+ */
+function positiveNumber(value: number | null | undefined): number | undefined {
+  return typeof value === "number" && value > 0 ? value : undefined;
+}
+
+/**
+ * 已知的輸出上限：上游 max_output_tokens，其次 legacy 的 max_tokens（LiteLLM 文件以之為輸出上限），
+ * 最後外部目錄。三者都沒有則回傳 undefined，讓呼叫端能判斷是否用了保底。
+ */
+export function knownOutputLimit(
+  info: { max_output_tokens?: number | null; max_tokens?: number | null } = {},
+  catalogOutput?: number,
+): number | undefined {
+  return positiveNumber(info.max_output_tokens) ?? positiveNumber(info.max_tokens) ?? positiveNumber(catalogOutput);
+}
+
+/**
+ * 決定輸出上限：已知值優先，查不到才用保底。不依模型族系猜測，避免把其他模型的值誤套上去。
+ */
+export function resolveOutputLimit(
+  info: { max_output_tokens?: number | null; max_tokens?: number | null } = {},
+  catalogOutput?: number,
+): number {
+  return knownOutputLimit(info, catalogOutput) ?? UNKNOWN_OUTPUT_FALLBACK;
+}
+
+/**
+ * 決定上下文上限：上游 max_input_tokens 優先，其次外部目錄，最後保底。
+ * 不使用 max_tokens：它在 LiteLLM 的文件中是輸出上限（legacy），用來當上下文會把輸出值誤當成上下文。
+ */
+export function resolveContextLimit(info: { max_input_tokens?: number | null } = {}, catalogContext?: number): number {
+  return positiveNumber(info.max_input_tokens) ?? positiveNumber(catalogContext) ?? UNKNOWN_CONTEXT_FALLBACK;
+}
+
 /**
  * 判斷模型是否屬於開源／第三方族系（DeepSeek, Qwen, Kimi, GLM, MiniMax, Llama 等）
  * 此類模型只吃標準的 /v1/chat/completions，不吃 Responses API

@@ -14,6 +14,11 @@ import {
   isOpenSourceFamily,
   parseLoginInput,
   resolveModelProtocol,
+  knownOutputLimit,
+  resolveContextLimit,
+  resolveOutputLimit,
+  UNKNOWN_CONTEXT_FALLBACK,
+  UNKNOWN_OUTPUT_FALLBACK,
 } from "../src/protocol.js";
 import { ModelProtocolPackage } from "../src/types.js";
 
@@ -117,5 +122,49 @@ describe("protocol / resolveModelProtocol (三位一體協定劃分)", () => {
     // 傳統舊版 OpenAI 模型走 Chat Completions
     expect(resolveModelProtocol("gpt-3.5-turbo")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
     expect(resolveModelProtocol("gpt-4")).toBe(ModelProtocolPackage.OPENAI_COMPATIBLE);
+  });
+});
+
+describe("protocol / output limit", () => {
+  it("上游有回報 max_output_tokens 時直接採用", () => {
+    expect(resolveOutputLimit({ max_output_tokens: 128000 })).toBe(128000);
+  });
+
+  it("上游沒回報時採用外部目錄值", () => {
+    expect(resolveOutputLimit({ max_output_tokens: null }, 128000)).toBe(128000);
+  });
+
+  it("上游與目錄都沒有時退回保底 4096，不依模型族系猜測", () => {
+    expect(resolveOutputLimit({}, undefined)).toBe(4096);
+    expect(resolveOutputLimit({ max_output_tokens: null })).toBe(UNKNOWN_OUTPUT_FALLBACK);
+  });
+
+  it("max_tokens 是上游第二順位來源，優先於外部目錄", () => {
+    expect(resolveOutputLimit({ max_output_tokens: null, max_tokens: 16384 }, 128000)).toBe(16384);
+  });
+
+  it("knownOutputLimit 只在確實有值時回傳，供呼叫端判斷是否落到保底", () => {
+    expect(knownOutputLimit({})).toBeUndefined();
+    expect(knownOutputLimit({ max_output_tokens: 0 }, 0)).toBeUndefined();
+    expect(knownOutputLimit({ max_tokens: 16384 })).toBe(16384);
+    expect(knownOutputLimit({}, 65536)).toBe(65536);
+  });
+});
+
+describe("protocol / context limit", () => {
+  it("上游 max_input_tokens 優先", () => {
+    expect(resolveContextLimit({ max_input_tokens: 200000 }, 1000000)).toBe(200000);
+  });
+
+  it("不使用 max_tokens 當上下文：它是輸出上限，不能誤當成 context", () => {
+    // max_tokens 是 legacy 的輸出欄位；若誤用，上下文會被縮成輸出上限
+    expect(resolveContextLimit({ max_tokens: 16384 } as any)).toBe(UNKNOWN_CONTEXT_FALLBACK);
+    expect(resolveContextLimit({ max_tokens: 16384 } as any, 200000)).toBe(200000);
+  });
+
+  it("上游沒有時採用外部目錄，都沒有則用集中定義的保底值", () => {
+    expect(resolveContextLimit({ max_input_tokens: null }, 1000000)).toBe(1000000);
+    expect(resolveContextLimit({})).toBe(128000);
+    expect(UNKNOWN_CONTEXT_FALLBACK).toBe(128000);
   });
 });
