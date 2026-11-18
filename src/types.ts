@@ -88,6 +88,10 @@ export interface MagpieUsageWindow {
   unit?: string;
   display?: string;
   resetsAt?: string;
+  /** 視窗涵蓋的秒數（週期長度），供 Magpie 計算進度 */
+  span?: number;
+  /** true 代表僅作展示：用完不會擋請求，Magpie routing 不讀取 */
+  aside?: boolean;
 }
 
 /**
