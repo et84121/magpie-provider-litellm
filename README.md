@@ -24,8 +24,18 @@ Magpie 原生 LiteLLM Proxy Provider 外掛。
 - 解決走 Anthropic 協定時 LiteLLM Proxy 虛擬金鑰（Virtual Key）因 Header 不一致被拒絕認證的問題。
 
 ### 4. Magpie Quota 預算與花費監控
-- 實作 Magpie 原生 `auth.usage` Hook，定期向 LiteLLM `/key/info` 取得花費金額（spend）、預算上限（max_budget）與重置週期。
-- 支援於 Magpie 桌面端 Quota 卡片與 `magpie quota` 命令列中直觀檢視。
+- 實作 Magpie 原生 `auth.usage` Hook，同時查詢 LiteLLM `/key/info`、`/user/info`、`/team/info`，把各層預算展開為 Magpie 視窗。
+- 支援的層級與設定（以 virtual key 即可讀取）：
+  - **Key**：總額上限（`max_budget` + `budget_duration`）、多視窗（`budget_limits`，例如同時 24h 與 30d）、單模型上限（`model_max_budget`，以字串摘要顯示）。
+  - **User**：個人上限（`max_budget` + `budget_duration`）。
+  - **Team**：僅當金鑰屬於 team（`team_id`）時查詢團隊上限。
+  - **Team 成員**：對齊 LiteLLM 的成員預算規則：成員個別上限（`team_memberships` 的 `litellm_budget_table.max_budget`）優先，沒有則套團隊預設（`team_member_budget`）；兩者都沒有就不顯示。
+- 週期中文化：`1h` 每小時、`24h`／`1d` 每日、`7d` 每週、`30d`／`1mo` 每月、`12mo` 每年。
+- 團隊金鑰不套用個人（User）預算，該層標示「（團隊金鑰不計）」、設為 `aside`（僅展示，不擋請求），且不計入剩餘額度。
+- 剩餘額度（balance）以剩餘金額最少、會擋請求的上限為準（不是用量百分比最高者），並標明是哪一層。上限用量讀不到時，以上限為上界。
+- 任一層讀取失敗會列出「（讀取失敗）」視窗、不計入剩餘額度，且 balance 前面加「最多」，代表它只是上界，不是完整結果。團隊金鑰的 User 層失敗不影響結果，因為該層本來就不計入。
+- 每個上限視窗帶 `span`（週期秒數）；不擋請求的資訊列帶 `aside: true`。
+- 於 Magpie 桌面端 Quota 卡片與 `magpie quota` 命令列中檢視。
 
 ### 5. 健全的容錯與工作階段追蹤
 - 精準識別 HTTP 401：金鑰過期標記 `expired` 觸發 Magpie 自動換號輪詢；特定模型未部署則標記 `kept` 避免誤停權。

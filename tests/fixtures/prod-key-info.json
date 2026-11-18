@@ -1,0 +1,16 @@
+{
+  "info": {
+    "spend": 1108.902334034198,
+    "max_budget": null,
+    "budget_duration": null,
+    "budget_reset_at": null,
+    "budget_limits": null,
+    "budget_limits_usage": null,
+    "model_max_budget": {},
+    "model_max_budget_usage": null,
+    "rpm_limit": null,
+    "tpm_limit": null,
+    "user_id": "REDACTED",
+    "team_id": null
+  }
+}

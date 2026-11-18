@@ -1,0 +1,141 @@
+{
+  "team_info": {
+    "team_id": "REDACTED",
+    "spend": 238.74728388,
+    "max_budget": 2000,
+    "budget_duration": "30d",
+    "budget_reset_at": "2026-12-01T00:00:00Z",
+    "budget_limits": null,
+    "team_member_budget": null,
+    "team_member_budget_duration": null,
+    "members_with_roles": [
+      {
+        "role": "admin",
+        "user_id": "member-1"
+      },
+      {
+        "role": "user",
+        "user_id": "member-2"
+      },
+      {
+        "role": "user",
+        "user_id": "member-3"
+      },
+      {
+        "role": "user",
+        "user_id": "member-4"
+      },
+      {
+        "role": "user",
+        "user_id": "member-5"
+      },
+      {
+        "role": "user",
+        "user_id": "member-6"
+      },
+      {
+        "role": "user",
+        "user_id": "member-7"
+      },
+      {
+        "role": "user",
+        "user_id": "member-8"
+      },
+      {
+        "role": "user",
+        "user_id": "member-9"
+      },
+      {
+        "role": "user",
+        "user_id": "member-10"
+      },
+      {
+        "role": "user",
+        "user_id": "member-11"
+      }
+    ]
+  },
+  "team_memberships": [
+    {
+      "user_id": "member-3",
+      "spend": 132.8475295650003,
+      "total_spend": 363.3760554749998,
+      "litellm_budget_table": {
+        "max_budget": null,
+        "budget_duration": "30d",
+        "budget_reset_at": "2026-12-01T00:00:00Z"
+      }
+    },
+    {
+      "user_id": "member-2",
+      "spend": 0,
+      "total_spend": 116.5463468,
+      "litellm_budget_table": {
+        "max_budget": null,
+        "budget_duration": "30d",
+        "budget_reset_at": "2026-12-01T00:00:00Z"
+      }
+    },
+    {
+      "user_id": "member-1",
+      "spend": 0,
+      "total_spend": 0,
+      "litellm_budget_table": {
+        "max_budget": null,
+        "budget_duration": "30d",
+        "budget_reset_at": "2026-12-01T00:00:00Z"
+      }
+    },
+    {
+      "user_id": "member-4",
+      "spend": 0,
+      "total_spend": 0,
+      "litellm_budget_table": {
+        "max_budget": null,
+        "budget_duration": "30d",
+        "budget_reset_at": "2026-12-01T00:00:00Z"
+      }
+    },
+    {
+      "user_id": "member-6",
+      "spend": 0,
+      "total_spend": 0,
+      "litellm_budget_table": {
+        "max_budget": null,
+        "budget_duration": "30d",
+        "budget_reset_at": "2026-12-01T00:00:00Z"
+      }
+    },
+    {
+      "user_id": "member-5",
+      "spend": 0,
+      "total_spend": 51.62285369999998,
+      "litellm_budget_table": {
+        "max_budget": null,
+        "budget_duration": "30d",
+        "budget_reset_at": "2026-12-01T00:00:00Z"
+      }
+    },
+    {
+      "user_id": "member-7",
+      "spend": 0,
+      "total_spend": 0,
+      "litellm_budget_table": {
+        "max_budget": null,
+        "budget_duration": "30d",
+        "budget_reset_at": "2026-12-01T00:00:00Z"
+      }
+    },
+    {
+      "user_id": "member-8",
+      "spend": 0,
+      "total_spend": 179.602853,
+      "litellm_budget_table": {
+        "max_budget": null,
+        "budget_duration": "30d",
+        "budget_reset_at": "2026-12-01T00:00:00Z"
+      }
+    }
+  ],
+  "key_user_id": "member-10"
+}
