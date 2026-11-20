@@ -488,10 +488,20 @@ describe("budget / TPM 設定上限顯示列", () => {
   function teamKeyRoutes(keyTpm: unknown, teamTpm: unknown) {
     return {
       "/key/info": {
-        info: { spend: 38.08, max_budget: 100, budget_duration: "7d", user_id: "u-1", team_id: "t-1", tpm_limit: keyTpm },
+        info: {
+          spend: 38.08,
+          max_budget: 100,
+          budget_duration: "7d",
+          user_id: "u-1",
+          team_id: "t-1",
+          tpm_limit: keyTpm,
+        },
       },
       "/user/info": { user_info: { spend: 10 } },
-      "/team/info": { team_info: { spend: 238.7, max_budget: 2000, budget_duration: "30d", tpm_limit: teamTpm }, team_memberships: [] },
+      "/team/info": {
+        team_info: { spend: 238.7, max_budget: 2000, budget_duration: "30d", tpm_limit: teamTpm },
+        team_memberships: [],
+      },
     };
   }
 

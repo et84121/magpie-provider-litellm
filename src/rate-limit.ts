@@ -26,11 +26,14 @@ const UPSTREAM_MESSAGE = /^(?:litellm\.RateLimitError: )?(?:RateLimitError: )?[A
 const TPM_WORDING = /\b(?:tokens per min(?:ute)?|TPM)\b/i;
 const RPM_WORDING = /\b(?:requests per min(?:ute)?|RPM)\b/i;
 const TOKEN_RATE_WORDING = /\btoken (?:rate|throughput) limit\b/i;
-const LIMIT_ASSERTED_AFTER = /^(?:\s*\((?:TPM|RPM)\))?(?:\s+(?:rate )?(?:limit|quota))?\s+(?:(?:was|is|has been)\s+)?(?:exceeded|reached|exhausted)\b/i;
-const LIMIT_ASSERTED_BEFORE = /(?:\brate limit (?:reached|exceeded)\b.{0,160}\bon\s+|\bexceed(?:ed|s)?\s+(?:(?:your|the|this)\s+)?(?:(?:organization|account|deployment|model)(?:['’]s)?\s+)?(?:rate limit of\s+)?(?:[\d,]+\s+)?)(?:(?:input|output)\s+)?$/i;
+const LIMIT_ASSERTED_AFTER =
+  /^(?:\s*\((?:TPM|RPM)\))?(?:\s+(?:rate )?(?:limit|quota))?\s+(?:(?:was|is|has been)\s+)?(?:exceeded|reached|exhausted)\b/i;
+const LIMIT_ASSERTED_BEFORE =
+  /(?:\brate limit (?:reached|exceeded)\b.{0,160}\bon\s+|\bexceed(?:ed|s)?\s+(?:(?:your|the|this)\s+)?(?:(?:organization|account|deployment|model)(?:['’]s)?\s+)?(?:rate limit of\s+)?(?:[\d,]+\s+)?)(?:(?:input|output)\s+)?$/i;
 const DELTA_SECONDS = /^\d+$/;
 const HTTP_DATE = /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/;
-const RFC850_DATE = /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), (\d{2})-([A-Z][a-z]{2})-(\d{2}) (\d{2}:\d{2}:\d{2}) GMT$/;
+const RFC850_DATE =
+  /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), (\d{2})-([A-Z][a-z]{2})-(\d{2}) (\d{2}:\d{2}:\d{2}) GMT$/;
 const ASCTIME_DATE = /^([A-Z][a-z]{2}) ([A-Z][a-z]{2}) (\d{2}| \d) (\d{2}:\d{2}:\d{2}) (\d{4})$/;
 
 /**
@@ -201,8 +204,10 @@ function assertsLimit(message: string, wording: RegExp): boolean {
   return message.split(/(?<!\d)\.|\.(?!\d)|[;!?\r\n]/).some((clause) => {
     const match = wording.exec(clause);
     if (!match) return false;
-    return LIMIT_ASSERTED_AFTER.test(clause.slice(match.index + match[0].length)) ||
-      LIMIT_ASSERTED_BEFORE.test(clause.slice(0, match.index));
+    return (
+      LIMIT_ASSERTED_AFTER.test(clause.slice(match.index + match[0].length)) ||
+      LIMIT_ASSERTED_BEFORE.test(clause.slice(0, match.index))
+    );
   });
 }
 
@@ -228,8 +233,12 @@ function classify(message: string, error: Record<string, unknown>, headers: Head
   const limitType = headers.get(HEADER_RATE_LIMIT_TYPE);
   const limitedBy = headers.get(HEADER_RATE_LIMITED_BY);
   if (message.startsWith(COOLDOWN_PREFIX)) return { source: RateLimitSource.COOLDOWN, dimension: undefined };
-  if (message.startsWith(BUDGET_ROUTING_PREFIX) || limitType === "budget" ||
-      error.type === "budget_exceeded" || error.litellm_error_type === "budget_exceeded") {
+  if (
+    message.startsWith(BUDGET_ROUTING_PREFIX) ||
+    limitType === "budget" ||
+    error.type === "budget_exceeded" ||
+    error.litellm_error_type === "budget_exceeded"
+  ) {
     return { source: RateLimitSource.BUDGET, dimension: undefined };
   }
 

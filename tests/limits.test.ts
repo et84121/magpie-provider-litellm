@@ -64,7 +64,14 @@ describe("limits / loadCatalog cache", () => {
     const path = join(dir(), "c.json");
     await Bun.write(path, JSON.stringify({ fetchedAt: 1000, catalog: payload }));
     let called = false;
-    const got = await loadCatalog(path, async () => { called = true; return new Response("{}"); }, () => 1000 + 60_000);
+    const got = await loadCatalog(
+      path,
+      async () => {
+        called = true;
+        return new Response("{}");
+      },
+      () => 1000 + 60_000,
+    );
     expect(called).toBe(false);
     expect(got).toEqual(payload);
   });
@@ -72,7 +79,11 @@ describe("limits / loadCatalog cache", () => {
   it("快取過期時下載並寫回", async () => {
     const path = join(dir(), "c.json");
     await Bun.write(path, JSON.stringify({ fetchedAt: 0, catalog: {} }));
-    const got = await loadCatalog(path, async () => new Response(JSON.stringify(payload)), () => 25 * 60 * 60 * 1000);
+    const got = await loadCatalog(
+      path,
+      async () => new Response(JSON.stringify(payload)),
+      () => 25 * 60 * 60 * 1000,
+    );
     expect(got).toEqual(payload);
     const saved = await Bun.file(path).json();
     expect(saved.catalog).toEqual(payload);
@@ -81,13 +92,19 @@ describe("limits / loadCatalog cache", () => {
   it("下載失敗時退回舊快取", async () => {
     const path = join(dir(), "c.json");
     await Bun.write(path, JSON.stringify({ fetchedAt: 0, catalog: payload }));
-    const got = await loadCatalog(path, async () => new Response("err", { status: 500 }), () => 25 * 60 * 60 * 1000);
+    const got = await loadCatalog(
+      path,
+      async () => new Response("err", { status: 500 }),
+      () => 25 * 60 * 60 * 1000,
+    );
     expect(got).toEqual(payload);
   });
 
   it("無快取且下載失敗時回傳 undefined", async () => {
     const path = join(dir(), "none.json");
-    const got = await loadCatalog(path, async () => { throw new Error("offline"); });
+    const got = await loadCatalog(path, async () => {
+      throw new Error("offline");
+    });
     expect(got).toBeUndefined();
   });
 

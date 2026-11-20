@@ -6,8 +6,10 @@ import { type LiteLLMModelInfoEntry, ModelProtocolPackage } from "./types.js";
 
 // 模式識別正規表達式
 const CLAUDE_PATTERN = /(?:^|[./_-])(?:anthropic|claude|opus|sonnet|haiku)(?:$|[./_:-])/i;
-const OPENSOURCE_PATTERN = /(?:deepseek|kimi|moonshot|glm|zhipu|qwen|minimax|mistral|codestral|llama|nemotron|grok|yi|baichuan)/i;
-const OPENAI_RESPONSES_PATTERN = /(?:^(?:ft:)?|[./_-])(?:gpt-[56789]|gpt-4o|gpt-4\.5|gpt-chat|o1|o3|o4|codex)(?:$|[./_:-])/i;
+const OPENSOURCE_PATTERN =
+  /(?:deepseek|kimi|moonshot|glm|zhipu|qwen|minimax|mistral|codestral|llama|nemotron|grok|yi|baichuan)/i;
+const OPENAI_RESPONSES_PATTERN =
+  /(?:^(?:ft:)?|[./_-])(?:gpt-[56789]|gpt-4o|gpt-4\.5|gpt-chat|o1|o3|o4|codex)(?:$|[./_:-])/i;
 
 /**
  * 清理並移除 URL 尾端多餘的斜線
@@ -66,10 +68,7 @@ export function isDecisionModel(modelId: string, item?: LiteLLMModelInfoEntry): 
   const baseModel = (item?.model_info?.base_model || "").toLowerCase();
 
   return (
-    mode === "evaluation" ||
-    mode === "decisions" ||
-    lowerId.includes("decision") ||
-    baseModel.includes("decision")
+    mode === "evaluation" || mode === "decisions" || lowerId.includes("decision") || baseModel.includes("decision")
   );
 }
 
@@ -86,7 +85,11 @@ export function isExcludedModel(modelId: string, item?: LiteLLMModelInfoEntry): 
  */
 export function isClaudeFamily(modelId: string, item?: LiteLLMModelInfoEntry): boolean {
   const lowerId = modelId.toLowerCase();
-  const provider = (item?.model_info?.litellm_provider || item?.litellm_params?.custom_llm_provider || "").toLowerCase();
+  const provider = (
+    item?.model_info?.litellm_provider ||
+    item?.litellm_params?.custom_llm_provider ||
+    ""
+  ).toLowerCase();
   const baseModel = (item?.model_info?.base_model || "").toLowerCase();
 
   if (provider === "anthropic" || baseModel.includes("claude") || baseModel.includes("anthropic")) {
@@ -145,14 +148,14 @@ export function resolveContextLimit(info: { max_input_tokens?: number | null } =
  */
 export function isOpenSourceFamily(modelId: string, item?: LiteLLMModelInfoEntry): boolean {
   const lowerId = modelId.toLowerCase();
-  const provider = (item?.model_info?.litellm_provider || item?.litellm_params?.custom_llm_provider || "").toLowerCase();
+  const provider = (
+    item?.model_info?.litellm_provider ||
+    item?.litellm_params?.custom_llm_provider ||
+    ""
+  ).toLowerCase();
   const baseModel = (item?.model_info?.base_model || "").toLowerCase();
 
-  return (
-    OPENSOURCE_PATTERN.test(lowerId) ||
-    OPENSOURCE_PATTERN.test(baseModel) ||
-    OPENSOURCE_PATTERN.test(provider)
-  );
+  return OPENSOURCE_PATTERN.test(lowerId) || OPENSOURCE_PATTERN.test(baseModel) || OPENSOURCE_PATTERN.test(provider);
 }
 
 /**
@@ -168,7 +171,8 @@ export function isOpenAIResponsesFamily(modelId: string, item?: LiteLLMModelInfo
   }
 
   const endpoints = item?.model_info?.supported_endpoints;
-  const listsResponses = Array.isArray(endpoints) && endpoints.some((e) => typeof e === "string" && e.includes("responses"));
+  const listsResponses =
+    Array.isArray(endpoints) && endpoints.some((e) => typeof e === "string" && e.includes("responses"));
 
   // 若 LiteLLM 明確宣告支援 responses 端點
   if (listsResponses) {

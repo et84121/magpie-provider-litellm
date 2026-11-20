@@ -48,7 +48,8 @@ describe("enrichRateLimitResponse / 上游供應商限流", () => {
   });
 
   it("上游只說 token throughput 時，不把時間單位猜成每分鐘", async () => {
-    const message = "litellm.RateLimitError: AzureException - This request has exceeded the token rate limit for this deployment.";
+    const message =
+      "litellm.RateLimitError: AzureException - This request has exceeded the token rate limit for this deployment.";
     const res = tooManyRequests(JSON.stringify({ error: { message } }));
 
     expect(await readMessage(await enrichRateLimitResponse(res))).toBe(
@@ -102,7 +103,10 @@ describe("enrichRateLimitResponse / LiteLLM 閘道限流", () => {
   it("沒有標頭時仍可從訊息的 Limit type 辨識並標示並行限流", async () => {
     const res = tooManyRequests(
       JSON.stringify({
-        error: { message: "Rate limit exceeded for team: t1. Limit type: concurrent_requests. Current limit: 2", type: "throttling_error" },
+        error: {
+          message: "Rate limit exceeded for team: t1. Limit type: concurrent_requests. Current limit: 2",
+          type: "throttling_error",
+        },
       }),
     );
 
@@ -113,7 +117,9 @@ describe("enrichRateLimitResponse / LiteLLM 閘道限流", () => {
 
   it("預算耗盡由 budget_exceeded 型別辨識", async () => {
     const res = tooManyRequests(
-      JSON.stringify({ error: { message: "Budget has been exceeded! Current cost: 0.06, Max budget: 0.05", type: "budget_exceeded" } }),
+      JSON.stringify({
+        error: { message: "Budget has been exceeded! Current cost: 0.06, Max budget: 0.05", type: "budget_exceeded" },
+      }),
     );
 
     const out = await enrichRateLimitResponse(res);
@@ -123,7 +129,9 @@ describe("enrichRateLimitResponse / LiteLLM 閘道限流", () => {
 
   it("部署冷卻由 No deployments available 前綴辨識", async () => {
     const res = tooManyRequests(
-      JSON.stringify({ error: { message: "No deployments available for selected model, cooling: 12s", type: "throttling_error" } }),
+      JSON.stringify({
+        error: { message: "No deployments available for selected model, cooling: 12s", type: "throttling_error" },
+      }),
       { "retry-after": "12" },
     );
 
@@ -157,9 +165,7 @@ describe("enrichRateLimitResponse / 無法辨識與降級", () => {
       "The request exceeded a separate request cap, check TPM settings.",
     ]) {
       const res = tooManyRequests(JSON.stringify({ error: { message } }));
-      expect(await readMessage(await enrichRateLimitResponse(res))).toBe(
-        `${message} [429 請求過多（來源未知）]`,
-      );
+      expect(await readMessage(await enrichRateLimitResponse(res))).toBe(`${message} [429 請求過多（來源未知）]`);
     }
   });
 
@@ -167,9 +173,7 @@ describe("enrichRateLimitResponse / 無法辨識與降級", () => {
     const message = "RPM limit exceeded; TPM limit exceeded.";
     const res = tooManyRequests(JSON.stringify({ error: { message } }));
 
-    expect(await readMessage(await enrichRateLimitResponse(res))).toBe(
-      `${message} [429 請求過多（來源未知）]`,
-    );
+    expect(await readMessage(await enrichRateLimitResponse(res))).toBe(`${message} [429 請求過多（來源未知）]`);
   });
 
   it("非 JSON 內文原樣回傳同一個 Response", async () => {
@@ -217,13 +221,16 @@ describe("enrichRateLimitResponse / 無法辨識與降級", () => {
   it("未宣告長度但讀到超過上限時，保留完整的原始內文", async () => {
     const payload = JSON.stringify({ error: { message: "訊".repeat(24_000) } });
     const bytes = new TextEncoder().encode(payload);
-    const res = new Response(new ReadableStream({
-      start(controller) {
-        controller.enqueue(bytes.subarray(0, 40_000));
-        controller.enqueue(bytes.subarray(40_000));
-        controller.close();
-      },
-    }), { status: 429, headers: { "content-type": "application/json" } });
+    const res = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes.subarray(0, 40_000));
+          controller.enqueue(bytes.subarray(40_000));
+          controller.close();
+        },
+      }),
+      { status: 429, headers: { "content-type": "application/json" } },
+    );
 
     expect(await enrichRateLimitResponse(res)).toBe(res);
     expect(await res.text()).toBe(payload);
@@ -260,7 +267,9 @@ describe("enrichRateLimitResponse / 無法辨識與降級", () => {
 describe("enrichRateLimitResponse / 標頭保留", () => {
   it("改寫後保留 status、statusText、Retry-After，並移除過時的 content-length／content-encoding", async () => {
     const res = tooManyRequests(
-      JSON.stringify({ error: { message: "Rate limit exceeded for api_key: x. Limit type: tokens.", type: "throttling_error" } }),
+      JSON.stringify({
+        error: { message: "Rate limit exceeded for api_key: x. Limit type: tokens.", type: "throttling_error" },
+      }),
       { "retry-after": "9", "content-length": "999", "content-encoding": "gzip", "x-litellm-call-id": "call-1" },
     );
 
@@ -315,16 +324,25 @@ describe("LitellmPlugin / loader 429 行為", () => {
     const plugin = await LitellmPlugin();
     const originalFetch = globalThis.fetch;
     let calls = 0;
-    globalThis.fetch = Object.assign(async () => {
-      calls += 1;
-      return tooManyRequests(
-        JSON.stringify({ error: { message: "Rate limit exceeded for api_key: k. Limit type: requests.", type: "throttling_error" } }),
-        { rate_limit_type: "requests", "retry-after": "3" },
-      );
-    }, { preconnect: originalFetch.preconnect });
+    globalThis.fetch = Object.assign(
+      async () => {
+        calls += 1;
+        return tooManyRequests(
+          JSON.stringify({
+            error: { message: "Rate limit exceeded for api_key: k. Limit type: requests.", type: "throttling_error" },
+          }),
+          { rate_limit_type: "requests", "retry-after": "3" },
+        );
+      },
+      { preconnect: originalFetch.preconnect },
+    );
 
     try {
-      const loader = await plugin.auth.loader(async () => ({ type: "api", key: "fixture-key", metadata: { baseURL: "http://localhost:4000" } }));
+      const loader = await plugin.auth.loader(async () => ({
+        type: "api",
+        key: "fixture-key",
+        metadata: { baseURL: "http://localhost:4000" },
+      }));
       const res = await loader.fetch!("http://localhost:4000/v1/chat/completions", { method: "POST" });
 
       expect(calls).toBe(1);
