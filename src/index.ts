@@ -5,27 +5,11 @@
  */
 
 import { queryLiteLLMBudget } from "./budget.js";
-import {
-  getApiBase,
-  getManagementBase,
-  isDecisionModel,
-  isExcludedModel,
-  parseLoginInput,
-  knownOutputLimit,
-  resolveContextLimit,
-  resolveModelProtocol,
-  resolveOutputLimit,
-  UNKNOWN_CONTEXT_FALLBACK,
-  UNKNOWN_OUTPUT_FALLBACK,
-} from "./protocol.js";
-import { loadCatalog, lookupLimit, type ModelsDevCatalog } from "./limits.js";
+import { discoverModels } from "./discovery.js";
+import { loadCatalog } from "./limits.js";
+import { getApiBase, getManagementBase, parseLoginInput } from "./protocol.js";
 import { enrichRateLimitResponse } from "./rate-limit.js";
-import {
-  type LiteLLMModelInfoEntry,
-  type MagpieStoredAuth,
-  type MagpieUsageResponse,
-  ModelProtocolPackage,
-} from "./types.js";
+import { type MagpieStoredAuth, type MagpieUsageResponse, ModelProtocolPackage } from "./types.js";
 
 export const PROVIDER_ID = "litellm";
 const CATALOG_CACHE_PATH = `${process.env.HOME ?? "."}/.cache/magpie-provider-litellm/models-dev.json`;
@@ -194,7 +178,7 @@ export const LitellmPlugin = async () => ({
   },
 
   /**
-   * 5. 動態模型探索 (Model Discovery)
+   * 5. 動態模型探索 (Model Discovery)：/model/info → /v1/models 階梯與組裝見 discovery.ts
    */
   provider: {
     id: PROVIDER_ID,
@@ -209,138 +193,14 @@ export const LitellmPlugin = async () => ({
         apiKey = parsed.apiKey;
       }
 
-      const rootUrl = getManagementBase(rawBase);
-      const apiBase = getApiBase(rawBase);
-      const headers = { Authorization: `Bearer ${apiKey}` };
-
-      try {
-        const signal = createTimeoutSignal();
-        const infoRes = await fetch(`${rootUrl}/model/info`, { headers, signal });
-        if (infoRes.ok) {
-          const infoJson = (await infoRes.json()) as any;
-          const entries: LiteLLMModelInfoEntry[] = Array.isArray(infoJson?.data) ? infoJson.data : [];
-          const validEntries = entries.filter((e) => e?.model_name && !e.model_name.includes("*"));
-
-          if (validEntries.length > 0) {
-            const mapped: Record<string, any> = {};
-            // 只有某個模型缺少上游明確上限時才需要外部目錄（惰性載入，避免每次探索都讀快取）
-            const needsCatalog = validEntries.some(
-              (e) => !e.model_info?.max_input_tokens || !e.model_info?.max_output_tokens,
-            );
-            const catalog: ModelsDevCatalog | undefined = needsCatalog
-              ? await loadCatalog(CATALOG_CACHE_PATH).catch(() => undefined)
-              : undefined;
-            const missingLimit: string[] = [];
-
-            for (const item of validEntries) {
-              const modelId = String(item.model_name);
-              const info = item.model_info || {};
-              const params = item.litellm_params || {};
-
-              // 排除非對話任務模型（如 embedding、image_generation）避免 Agent 誤選崩潰
-              if (isExcludedModel(modelId, item)) {
-                continue;
-              }
-
-              const isDecision = isDecisionModel(modelId, item);
-              const protocolNpm = resolveModelProtocol(modelId, item);
-              const external = catalog ? lookupLimit(catalog, params.model || modelId) : undefined;
-              // 與 resolveOutputLimit 的判斷一致：只有真的落到保底時才警告
-              if (knownOutputLimit(info, external?.output) === undefined) missingLimit.push(modelId);
-              const contextLimit = resolveContextLimit(info, external?.context);
-              const outputLimit = resolveOutputLimit(info, external?.output);
-              const hasTools = !isDecision && info.supports_function_calling !== false;
-              const hasVision = !isDecision && info.supports_vision === true;
-              const isReasoning =
-                !isDecision &&
-                (info.mode === "reasoning" ||
-                  /o1|o3|r1|deepseek-reasoner/i.test(modelId) ||
-                  info.supports_reasoning === true);
-
-              let cost: any = undefined;
-              if (typeof info.input_cost_per_token === "number" || typeof info.output_cost_per_token === "number") {
-                cost = {
-                  input: (info.input_cost_per_token || 0) * 1_000_000,
-                  output: (info.output_cost_per_token || 0) * 1_000_000,
-                };
-              }
-
-              mapped[modelId] = {
-                id: modelId,
-                name: modelId,
-                ...(isDecision ? { decides: true } : {}),
-                api: {
-                  id: params.model || modelId,
-                  url: apiBase,
-                  npm: protocolNpm,
-                },
-                limit: {
-                  context: contextLimit,
-                  output: outputLimit,
-                },
-                capabilities: {
-                  toolcall: hasTools,
-                  reasoning: isReasoning,
-                  input: {
-                    text: true,
-                    image: hasVision,
-                  },
-                },
-                ...(cost ? { cost } : {}),
-              };
-            }
-
-            if (missingLimit.length)
-              console.warn(
-                `[magpie-provider-litellm] 無法取得輸出上限，使用保底 ${UNKNOWN_OUTPUT_FALLBACK}：${missingLimit.join(", ")}`,
-              );
-            return mapped;
-          }
-        }
-      } catch {
-        // 失敗退回 /v1/models
-      }
-
-      try {
-        const signal = createTimeoutSignal();
-        const listRes = await fetch(`${apiBase}/models`, { headers, signal });
-        if (listRes.ok) {
-          const listJson = (await listRes.json()) as any;
-          const list = Array.isArray(listJson?.data) ? listJson.data : [];
-
-          if (list.length > 0) {
-            const mapped: Record<string, any> = {};
-            for (const m of list) {
-              const modelId = String(m.id);
-              const protocolNpm = resolveModelProtocol(modelId);
-
-              mapped[modelId] = {
-                id: modelId,
-                name: modelId,
-                api: {
-                  id: modelId,
-                  url: apiBase,
-                  npm: protocolNpm,
-                },
-                limit: {
-                  context: UNKNOWN_CONTEXT_FALLBACK,
-                  output: UNKNOWN_OUTPUT_FALLBACK,
-                },
-                capabilities: {
-                  toolcall: true,
-                  reasoning: /o1|o3|r1|deepseek-reasoner/i.test(modelId),
-                  input: { text: true },
-                },
-              };
-            }
-            return mapped;
-          }
-        }
-      } catch {
-        // 保留原快取
-      }
-
-      return provider.models;
+      const discovered = await discoverModels({
+        rootUrl: getManagementBase(rawBase),
+        apiBase: getApiBase(rawBase),
+        apiKey,
+        loadExternal: () => loadCatalog(CATALOG_CACHE_PATH),
+      });
+      // 兩階都不可用（傳輸失敗、損毀回應）時保留 Magpie 既有的清單
+      return discovered ?? provider.models;
     },
   },
 

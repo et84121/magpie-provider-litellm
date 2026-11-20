@@ -81,6 +81,30 @@ describe("LitellmPlugin / loader fetch", () => {
   });
 });
 
+describe("LitellmPlugin / provider.models 保留既有清單", () => {
+  it("兩個探索端點都失敗時回傳 Magpie 既有的同一個清單物件", async () => {
+    // 假 gateway 兩端點皆 404：不會進入目錄載入，因此不連 models.dev、也不寫入真實 ~/.cache
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("nope", { status: 404 }) });
+    try {
+      const plugin = await LitellmPlugin();
+      const existing = { "acme-coder": { id: "acme-coder", name: "acme-coder" } };
+      const out = await plugin.provider.models(
+        { models: existing },
+        {
+          auth: {
+            type: "api",
+            key: "fake-test-api-key-not-a-secret",
+            metadata: { baseURL: `http://127.0.0.1:${server.port}` },
+          },
+        },
+      );
+      expect(out).toBe(existing);
+    } finally {
+      server.stop(true);
+    }
+  });
+});
+
 describe("LitellmPlugin / chat.headers", () => {
   it("注入對話 sessionID 至 x-litellm-session-id 標頭", async () => {
     const plugin = await LitellmPlugin();
