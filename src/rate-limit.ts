@@ -7,12 +7,12 @@
  * 上游供應商錯誤訊息含 <Provider>Exception；部署冷卻與預算 routing 有固定前綴）。
  */
 
+import { readBoundedText } from "./bounded-body.js";
+
 const HTTP_TOO_MANY_REQUESTS = 429;
 const HEADER_RATE_LIMIT_TYPE = "rate_limit_type";
 const HEADER_RATE_LIMITED_BY = "rate_limited_by";
 const HEADER_RETRY_AFTER = "retry-after";
-const MAX_ERROR_BYTES = 64 * 1024;
-const ERROR_READ_TIMEOUT_MS = 250;
 const JSON_MEDIA_TYPE = /^application\/(?:[\w.+-]+\+)?json$/i;
 // 內文已改寫，舊的長度與編碼標頭不再對應新的 body
 const STALE_BODY_HEADERS = ["content-length", "content-encoding"] as const;
@@ -108,45 +108,13 @@ function parseJsonRecord(text: string): Record<string, unknown> | undefined {
 }
 
 /**
- * 讀取可用於補充提示的 429 內文；讀得太慢或太大時，不阻擋原始回應。
+ * 讀取可用於補充提示的 429 內文；非 JSON、過大或過慢時，不阻擋原始回應。
  * @private
  */
 async function readErrorText(res: Response): Promise<string | undefined> {
   const mediaType = res.headers.get("content-type")?.split(";", 1)[0].trim();
   if (mediaType !== undefined && !JSON_MEDIA_TYPE.test(mediaType)) return undefined;
-  if (Number(res.headers.get("content-length")) > MAX_ERROR_BYTES) return undefined;
-  if (!res.body || res.body.locked) return undefined;
-
-  const reader = res.clone().body?.getReader();
-  if (!reader) return undefined;
-  const decoder = new TextDecoder();
-  let timedOut = false;
-  let bytes = 0;
-  let text = "";
-  // 只取消診斷用的分支。不等待 cancel：原始分支還在等外掛交回回應。
-  const cancel = () => {
-    void reader.cancel().catch(() => undefined);
-  };
-  const timer = setTimeout(() => {
-    timedOut = true;
-    cancel();
-  }, ERROR_READ_TIMEOUT_MS);
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (timedOut) return undefined;
-      if (done) return text + decoder.decode();
-      bytes += value.byteLength;
-      if (bytes > MAX_ERROR_BYTES) return undefined;
-      text += decoder.decode(value, { stream: true });
-    }
-  } catch {
-    return undefined;
-  } finally {
-    clearTimeout(timer);
-    if (!timedOut) cancel();
-    reader.releaseLock();
-  }
+  return readBoundedText(res);
 }
 
 /**
