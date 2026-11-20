@@ -36,9 +36,11 @@ Magpie 原生 LiteLLM Proxy Provider 外掛。
 - 任一層讀取失敗會列出「（讀取失敗）」視窗、不計入剩餘額度，且 balance 前面加「最多」，代表它只是上界，不是完整結果。團隊金鑰的 User 層失敗不影響結果，因為該層本來就不計入。
 - 每個上限視窗帶 `span`（週期秒數）；不擋請求的資訊列帶 `aside: true`。
 - 於 Magpie 桌面端 Quota 卡片與 `magpie quota` 命令列中檢視。
+- 帳號 Quota 卡片也會列出 LiteLLM 金鑰與團隊各自設定的 TPM（每分鐘 token 上限）。這些數字不是即時剩餘量，也不代表上游供應商的配額，不參與 Magpie 路由。
 
 ### 5. 健全的容錯與工作階段追蹤
 - 精準識別 HTTP 401：金鑰過期標記 `expired` 觸發 Magpie 自動換號輪詢；特定模型未部署則標記 `kept` 避免誤停權。
+- HTTP 429：有明確證據才補上限流原因與伺服器提供的重試時間。內文超過 64 KiB、讀取超過 250 毫秒，或無法解析時，原樣轉傳。保留原始錯誤格式與 `Retry-After`；外掛不重試，備援切換交由 Magpie。
 - 自動將 Magpie 對話 `sessionID` 注入至 `x-litellm-session-id`，利於 LiteLLM 控制台審計。
 
 ---

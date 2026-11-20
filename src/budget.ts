@@ -44,6 +44,8 @@ interface BudgetBlock {
 interface KeyInfo extends BudgetBlock {
   user_id?: string | null;
   team_id?: string | null;
+  /** 金鑰的每分鐘 token 上限設定（TPM），僅顯示用；來源：https://docs.litellm.ai/docs/proxy/users#rate-limits */
+  tpm_limit?: number | null;
 }
 
 interface TeamMembership {
@@ -56,6 +58,8 @@ interface TeamInfo extends BudgetBlock {
   /** 團隊對每位成員的預設上限（LiteLLM 的 team_member_budget），成員沒有個別上限時套用 */
   team_member_budget?: number | null;
   team_member_budget_duration?: string | null;
+  /** 團隊的每分鐘 token 上限設定（TPM），僅顯示用；來源同 KeyInfo.tpm_limit */
+  tpm_limit?: number | null;
 }
 
 interface TeamInfoResponse {
@@ -231,6 +235,17 @@ function spendPart(scope: Scope, capped: boolean): Part {
     rank: 2,
     pct: 0,
   };
+}
+
+/**
+ * TPM 設定上限的純顯示列：只列出正整數，不把缺值或無效值當成 0。
+ * 沒有即時用量可比對，所以不給 amount、limit、used、resetsAt，也不進入剩餘額度計算。
+ * @private
+ */
+function tpmParts(name: string, tpm: number | null | undefined): Part[] {
+  const limit = positive(tpm);
+  if (limit === null || !Number.isSafeInteger(limit)) return [];
+  return [{ window: { name, display: `${limit.toLocaleString("en-US")} tokens/分鐘`, aside: true }, rank: 2, pct: 0 }];
 }
 
 /**
@@ -426,7 +441,12 @@ export async function queryLiteLLMBudget(
     if (member) scopes.push(toScope("Team 成員", member, membership?.spend ?? 0, true));
   }
 
-  const parts: Part[] = [...scopes.flatMap(scopeParts), ...failures];
+  const parts: Part[] = [
+    ...scopes.flatMap(scopeParts),
+    ...failures,
+    ...tpmParts("LiteLLM Key TPM 設定上限", info.tpm_limit),
+    ...tpmParts("LiteLLM Team TPM 設定上限", teamInfo?.tpm_limit),
+  ];
   const modelWindow = modelSummaryWindow(scopes);
   if (modelWindow) parts.push({ window: modelWindow, rank: 2, pct: 0 });
   parts.sort(comparePart);

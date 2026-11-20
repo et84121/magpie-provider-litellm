@@ -20,6 +20,7 @@ import {
   UNKNOWN_OUTPUT_FALLBACK,
 } from "./protocol.js";
 import { loadCatalog, lookupLimit, type ModelsDevCatalog } from "./limits.js";
+import { enrichRateLimitResponse } from "./rate-limit.js";
 import {
   type LiteLLMKeyInfoResponse,
   type LiteLLMModelInfoEntry,
@@ -169,7 +170,7 @@ export const LitellmPlugin = async () => ({
             });
           }
 
-          return res;
+          return enrichRateLimitResponse(res);
         },
       };
     },
