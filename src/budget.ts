@@ -23,6 +23,7 @@
  */
 
 import { z } from "zod";
+import { isRecord } from "./json.js";
 import { getManagementBase } from "./protocol.js";
 import type { MagpieUsageResponse, MagpieUsageWindow } from "./types.js";
 
@@ -66,7 +67,9 @@ const KeyInfoResponseSchema = z.object({ info: KeyInfoSchema });
 const UserInfoResponseSchema = z.object({ user_info: BudgetBlockSchema });
 
 const TeamInfoSchema = BudgetBlockSchema.extend({
-  /** 團隊對每位成員的預設上限（LiteLLM 的 team_member_budget），成員沒有個別上限時套用 */
+  /** LiteLLM /team/info 關聯的團隊預設成員預算表，成員沒有個別上限時套用 */
+  team_member_budget_table: BudgetBlockSchema.nullish(),
+  /** 舊版或平坦回應的團隊成員預設上限（建立後 LiteLLM 會改存於 team_member_budget_table） */
   team_member_budget: z.number().nonnegative().nullish(),
   team_member_budget_duration: z.string().nullish(),
   tpm_limit: z.unknown().optional(),
@@ -138,7 +141,6 @@ interface Part {
 /**
  * 解析 duration 字串（例如 "30d", "7d", "24h", "1w"）為秒數。
  * 只接受 LiteLLM 有固定長度的單位（s/m/h/d/w）；"mo" 是日曆月，沒有固定秒數，回傳 undefined。
- * @private
  */
 export function parseDurationToSeconds(duration?: string | null): number | undefined {
   if (!duration) return undefined;
@@ -205,13 +207,6 @@ function toIso(value?: string | null): string | undefined {
 }
 
 /**
- * @private
- */
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
  * 逐條目驗證陣列；容器本身不是陣列時整體計為一個無效條目
  * @private
  */
@@ -233,7 +228,7 @@ function parseEntries<T>(schema: z.ZodType<T>, raw: unknown): { items: T[]; inva
  * @private
  */
 function parseRecord<T>(schema: z.ZodType<T>, raw: unknown): Record<string, T | undefined> {
-  if (!isPlainRecord(raw)) return {};
+  if (!isRecord(raw)) return {};
   return Object.fromEntries(
     Object.entries(raw).map(([key, value]) => {
       const parsed = schema.safeParse(value);
@@ -248,7 +243,7 @@ function parseRecord<T>(schema: z.ZodType<T>, raw: unknown): Record<string, T | 
  */
 function parseModels(raw: unknown): { items: ModelUsage[]; invalid: number } {
   if (raw === undefined || raw === null) return { items: [], invalid: 0 };
-  if (!isPlainRecord(raw)) return { items: [], invalid: 1 };
+  if (!isRecord(raw)) return { items: [], invalid: 1 };
   const items: ModelUsage[] = [];
   let invalid = 0;
   for (const [model, value] of Object.entries(raw)) {
@@ -293,7 +288,7 @@ function capPart(
   if (!enforced) {
     return { window: { ...window, name: `${name}（團隊金鑰不計）`, aside: true }, rank: 1, pct: 0 };
   }
-  const pct = max > 0 ? Math.min(100, Math.round((spend / max) * 100)) : 100;
+  const pct = max > 0 ? Math.round((spend / max) * 100) : 100;
   return {
     window: { ...window, used: pct },
     rank: 0,
@@ -320,12 +315,11 @@ function unknownUsagePart(name: string, max: number, duration: string | null | u
 
 /**
  * 花費資訊列：不擋請求，標為 aside。沒有上限可算比例，所以只給 display、不給 amount，
- * 否則 Magpie 會把它顯示成「0%」這種誤導的百分比。capped 為 true 時代表此層另有上限，這一列只補充累計花費
+ * 否則 Magpie 會把它顯示成「0%」這種誤導的百分比。有設 budget_duration 時標示週期，無週期才標累計花費
  * @private
  */
-function spendPart(scope: Scope, capped: boolean): Part {
-  const useCumulative = capped || !scope.duration;
-  const name = useCumulative ? `${scope.level} 累計花費` : `${scope.level} · ${formatPeriod(scope.duration)} 花費`;
+function spendPart(scope: Scope): Part {
+  const name = scope.duration ? `${scope.level} · ${formatPeriod(scope.duration)} 花費` : `${scope.level} 累計花費`;
   const display = scope.spend === undefined ? "用量未取得" : `$${scope.spend.toFixed(2)}`;
   return { window: { name, display, aside: true }, rank: 2, pct: 0 };
 }
@@ -390,11 +384,13 @@ function scopeParts(scope: Scope): Part[] {
   }
 
   if (parts.length === 0) {
-    if (scope.spend === undefined || scope.spend > 0) parts.push(spendPart(scope, false));
+    if (scope.spend === undefined || scope.spend > 0) parts.push(spendPart(scope));
     return parts;
   }
-  // 有上限時，Key 的累計花費仍以資訊列呈現（與舊版行為一致）
-  if (scope.level === "Key" && (scope.spend === undefined || scope.spend > 0)) parts.push(spendPart(scope, true));
+  // 只有多視窗（沒有主 max_budget）時，Key 總花費才沒有在主上限列呈現，另外補一列資訊
+  if (scope.level === "Key" && scope.max === null && (scope.spend === undefined || scope.spend > 0)) {
+    parts.push(spendPart(scope));
+  }
   return parts;
 }
 
@@ -433,12 +429,17 @@ function toScope(level: Level, block: BudgetBlock, spend: number | undefined, en
 }
 
 /**
- * 團隊預設的成員上限，取自 team_member_budget；未設定或非正數則 undefined
+ * 團隊預設的成員上限：優先取 team_member_budget_table（LiteLLM /team/info 關聯的預算表），
+ * 其次相容平坦欄位 team_member_budget；未設定或非正數則 undefined
  * @private
  */
 function teamDefaultBlock(team: TeamInfo): BudgetBlock | undefined {
-  if (positive(team.team_member_budget) === null) return undefined;
-  return { max_budget: team.team_member_budget, budget_duration: team.team_member_budget_duration };
+  const table = team.team_member_budget_table;
+  if (table && positive(table.max_budget) !== null) return table;
+  if (positive(team.team_member_budget) !== null) {
+    return { max_budget: team.team_member_budget, budget_duration: team.team_member_budget_duration };
+  }
+  return undefined;
 }
 
 /**

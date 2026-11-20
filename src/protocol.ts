@@ -13,25 +13,31 @@ const OPENAI_RESPONSES_PATTERN =
   /(?:^(?:ft:)?|[./_-])(?:gpt-[56789]|gpt-4o|gpt-4\.5|gpt-chat|o1|o3|o4|codex)(?:$|[./_:-])/i;
 
 /**
- * 明確宣告為非 chat completions 任務的 mode（LiteLLM ModelInfoBase.mode 的子集）。
+ * 明確宣告為非 chat completions 任務的 mode（LiteLLM ModelInfoBase.mode 的子集及定價表常見模式）。
  * 只排除有明確 mode 證據的模型；未知或缺漏的 mode 仍視為對話模型，不靠名稱猜測。
  * @private
  */
 const NON_CHAT_MODES = new Set([
+  "completion",
   "embedding",
   "image_generation",
   "audio_transcription",
   "audio_speech",
+  "extraction",
   "ocr",
   "realtime",
+  "rerank",
+  "moderation",
 ]);
+
+const DECISION_MODES = new Set(["evaluation", "decisions"]);
+const DECISION_MODEL_NAME = /(?:^|\/)(?:microsoft-)?decision-1$/i;
 
 /** 名稱推論推理模型的樣式，只在沒有 supports_reasoning 證據時才用 */
 const REASONING_NAME_PATTERN = /deepseek-reasoner|(?:^|[-_./])(?:o1|o3|o4|r1)(?:$|[-_./])/i;
 
 /**
  * 清理並移除 URL 尾端多餘的斜線
- * @private
  */
 export function cleanUrl(url: string): string {
   return url.trim().replace(/\/+$/, "");
@@ -95,23 +101,23 @@ export function resolveConnection(
 }
 
 /**
- * 判斷模型是否為決策／分類評估模型（例如 Decision-1）
+ * 判斷模型是否為決策／分類評估模型（mode 為 evaluation / decisions，或無 mode 時的 Decision-1）。
+ * 有明確其他 mode（如 chat）時不依名稱誤判，避免正常對話模型被標成 decides 而無法對話。
  */
 export function isDecisionModel(modelId: string, item?: LiteLLMModelInfoEntry): boolean {
-  const lowerId = modelId.toLowerCase();
   const mode = (item?.model_info?.mode || "").toLowerCase();
-  const baseModel = (item?.model_info?.base_model || "").toLowerCase();
+  if (DECISION_MODES.has(mode)) return true;
+  if (mode) return false;
 
-  return (
-    mode === "evaluation" || mode === "decisions" || lowerId.includes("decision") || baseModel.includes("decision")
-  );
+  const baseModel = item?.model_info?.base_model || "";
+  return DECISION_MODEL_NAME.test(modelId.trim()) || DECISION_MODEL_NAME.test(baseModel.trim());
 }
 
 /**
- * 判斷是否為應排除的非對話模型（如 embedding、圖片生成、語音等）。
+ * 判斷是否為應排除的非對話模型（如 embedding、圖片生成、語音、rerank 等）。
  * 只看 model_info.mode 這個明確證據，不看模型名稱。
  */
-export function isExcludedModel(modelId: string, item?: LiteLLMModelInfoEntry): boolean {
+export function isExcludedModel(item?: LiteLLMModelInfoEntry): boolean {
   const mode = (item?.model_info?.mode || "").toLowerCase();
   return NON_CHAT_MODES.has(mode);
 }

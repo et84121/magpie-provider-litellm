@@ -97,18 +97,24 @@ describe("protocol / resolveConnection 優先序", () => {
 });
 
 describe("protocol / isDecisionModel & isExcludedModel", () => {
-  it("正確識別 Decision-1 及 evaluation 模式為決策分類模型", () => {
+  it("正確識別 Decision-1 及 evaluation 模式為決策分類模型，不誤判僅名稱含 decision 的模型", () => {
     expect(isDecisionModel("Decision-1")).toBe(true);
-    expect(isDecisionModel("decision-classifier")).toBe(true);
+    expect(isDecisionModel("microsoft/decision-1")).toBe(true);
+    expect(isDecisionModel("decision-classifier")).toBe(false);
+    expect(isDecisionModel("Decision-1", { model_info: { mode: "chat" } } as any)).toBe(false);
     expect(isDecisionModel("custom-model", { model_info: { mode: "evaluation" } } as any)).toBe(true);
     expect(isDecisionModel("custom-model", { model_info: { mode: "decisions" } } as any)).toBe(true);
     expect(isDecisionModel("gpt-4o", { model_info: { mode: "chat" } } as any)).toBe(false);
   });
 
-  it("正確識別 embedding 與 image_generation 模型為排除對象", () => {
-    expect(isExcludedModel("text-embedding-3-small", { model_info: { mode: "embedding" } } as any)).toBe(true);
-    expect(isExcludedModel("gpt-image-2", { model_info: { mode: "image_generation" } } as any)).toBe(true);
-    expect(isExcludedModel("deepseek-chat", { model_info: { mode: "chat" } } as any)).toBe(false);
+  it("正確識別非對話 mode 為排除對象", () => {
+    expect(isExcludedModel({ model_info: { mode: "embedding" } } as any)).toBe(true);
+    expect(isExcludedModel({ model_info: { mode: "image_generation" } } as any)).toBe(true);
+    expect(isExcludedModel({ model_info: { mode: "completion" } } as any)).toBe(true);
+    expect(isExcludedModel({ model_info: { mode: "extraction" } } as any)).toBe(true);
+    expect(isExcludedModel({ model_info: { mode: "rerank" } } as any)).toBe(true);
+    expect(isExcludedModel({ model_info: { mode: "moderation" } } as any)).toBe(true);
+    expect(isExcludedModel({ model_info: { mode: "chat" } } as any)).toBe(false);
   });
 });
 

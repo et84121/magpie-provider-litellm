@@ -18,14 +18,15 @@ Magpie 原生 LiteLLM Proxy Provider 外掛。
 
 ### 2. 動態模型探索
 
-- 第一優先：查詢 LiteLLM `/model/info`，讀取 Context Window、Output Limit、定價（每百萬 Token）、Tool Call、Reasoning 與 Vision 支援。
+- 第一優先：查詢 LiteLLM `/model/info`，讀取 Context Window、Output Limit、定價（每百萬 Token，含快取讀取／寫入單價）、Tool Call、Reasoning、Vision 與 PDF 輸入支援；Vision 或 PDF 任一支援即開啟 `attachment`。
 - 次之：`/model/info` 不可用時改查 `/v1/models`。
 - 規則（權威性由強到弱）：
   - `/model/info` 傳輸失敗、非 2xx、非 JSON、信封格式不合，或沒有任何可用列（全是損毀或 wildcard 列）→ 改查 `/v1/models`。
   - 信封合法且 `data: []` → 權威的空清單，清空模型，**不再降級**到 `/v1/models`。
   - 有可用列 → 權威結果。即使全是非對話模型，也**不會**從 `/v1/models` 補回（避免把 embedding 誤當成對話模型）。
   - 兩個端點都不可用 → 保留 Magpie 既有的模型清單。
-- 非對話模型（`model_info.mode` 為 embedding 等明確非對話類型）會被略過；不依模型名稱猜測。
+- 非對話模型（`model_info.mode` 為 `embedding`、`image_generation`、`audio_transcription`、`audio_speech`、`ocr`、`realtime`、`rerank`、`moderation`、`extraction`、`completion`）會被略過；其他或缺漏的 mode 仍視為對話模型，不依模型名稱猜測。
+- 決策模型（`decides`）只認 `mode` 為 `evaluation`／`decisions`，或沒有 mode 時名稱為 `Decision-1`；有明確其他 mode 時不依名稱判定。
 - **Wire model ID 一律是 LiteLLM 的 `model_name`**：呼叫與 key／team 的 models 白名單都比對它。`litellm_params.model`（上游部署名）只用來查外部上限與目錄，**不會送上 proxy**。
 - 上限來源：LiteLLM 明確數值優先；缺值時查 models.dev 目錄；仍缺輸出上限時使用保底值 4096，並在終端機警告。
 - models.dev 目錄快取於 `~/.cache/magpie-provider-litellm/models-dev.json`，TTL 24 小時。快取損毀或形狀不合會重新下載；下載失敗時保留既有有效快取（即使已過期），不覆寫。
@@ -42,7 +43,7 @@ Magpie 原生 LiteLLM Proxy Provider 外掛。
   - **Key**：總額上限（`max_budget` + `budget_duration`）、多視窗（`budget_limits`）、單模型上限（`model_max_budget`，以字串摘要顯示）。
   - **User**：個人上限（`max_budget` + `budget_duration`）。
   - **Team**：僅當金鑰屬於 team（`team_id`）時查詢團隊上限。
-  - **Team 成員**：成員個別上限（`team_memberships` 的 `litellm_budget_table.max_budget`）優先，沒有則套團隊預設（`team_member_budget`）；兩者都沒有就不顯示。
+  - **Team 成員**：成員個別上限（`team_memberships` 的 `litellm_budget_table.max_budget`）優先，沒有則套團隊預設（優先讀 `/team/info` 的 `team_member_budget_table`，相容平坦欄位 `team_member_budget`）；兩者都沒有就不顯示。
 - 週期中文化：`1h` 每小時、`24h`／`1d` 每日、`7d` 每週、`30d`／`1mo` 每月、`12mo` 每年。
 - 團隊金鑰不套用個人（User）預算：該層標示「（團隊金鑰不計）」、設為 `aside`（僅展示，不擋請求），且不計入剩餘額度。
 - 剩餘額度（balance）以剩餘金額最少、會擋請求的上限為準，並標明是哪一層。上限用量讀不到時，以上限為上界。
@@ -54,12 +55,12 @@ Magpie 原生 LiteLLM Proxy Provider 外掛。
 ### 5. 401、429 與工作階段追蹤
 
 - **401**：只有確認的 key 失效才標記 `X-Magpie-Sign-In: expired`，觸發 Magpie 換號輪詢。判定優先序：
-  1. LiteLLM 錯誤類型為 `expired_key`、`token_not_found_in_db` 或 `auth_error` → `expired`。
+  1. LiteLLM 錯誤類型為 `expired_key` 或 `token_not_found_in_db` → `expired`。`auth_error` 是兜底類型（預算預扣失敗等也會用），不單獨作為證據。
   2. 上游供應商錯誤（`<Provider>Exception -`）→ 無法判定，`kept`，不標記使用者帳號。
-  3. 明確的「invalid／expired … key」字樣 → `expired`（即使同一訊息也提到模型）。
+  3. 明確的「invalid／expired／blocked … key」字樣 → `expired`（即使同一訊息也提到模型）。
   4. 模型不被提供（如 `model_not_found`）→ `kept`。
   5. 其餘、內文空白、不可讀、超過 64 KiB，或讀取超過 250 毫秒 → `kept`。
-  - 401 的原始內文與狀態保持不變。
+  - 401 的原始內文與狀態保持不變；重新包裝時移除過時的 `content-length`、`content-encoding`。
 - **429**：有明確證據時，在 `error.message` 後補上限流來源與維度（RPM／TPM／並發等），並說明伺服器建議的重試秒數。判定來源包括 gateway 限流（`rate_limit_type`／`rate_limited_by` 標頭，或 `Rate limit exceeded for` 前綴）、上游供應商、部署冷卻與預算路由。內文超過 64 KiB、讀取超過 250 毫秒，或無法解析時原樣轉傳。保留原始 `Retry-After`。外掛不自動重試，備援切換交由 Magpie。
 - **工作階段**：`chat.headers` Hook 會把 Magpie 的 `sessionID` 注入 `x-litellm-session-id`（僅限此 provider）。
 
@@ -181,10 +182,11 @@ CI 使用 Bun 1.4.5（見 `.github/workflows`）。
 - **GitHub 遠端安裝**（`github:et84121/magpie-provider-litellm`）：尚未推送，未測試。
 - **`x-litellm-session-id` 端到端**：Magpie CLI 的 `provider test` 不會帶入 `sessionID`，未經 Magpie gateway 驗證；由 `tests/plugin.test.ts` 涵蓋 Hook 本身。
 - **`LITELLM_BASE_URL` 與複合 key 格式**：由程式碼與單元測試涵蓋，未在 Magpie 中實際操作。
+- **401 判定規則調整（`auth_error` 不再單獨判定 expired、新增 `blocked` 字樣）**：上表的 wire 測試早於此調整，新規則只由 `tests/sign-in.test.ts` 與 `tests/fetch-interceptor.test.ts` 涵蓋。
 - **401 後 Magpie 帳號的實際狀態變化**（換號、標記需重新登入）：只驗證了外掛送出的標頭。
 - **Bun 1.4.5**：本機未安裝（npm 發佈年齡限制，且沒有已核准的取得路線），以 Bun 1.4.4 執行 install、check、lint、fmt、test。CI 的 1.4.5 未在本機重現。
 
 ### 已知的執行環境差異
 
-- 401 回應內文在 **Bun 1.3.x** 上，於外掛有界讀取後會變成空白；在 Magpie 使用的 **Bun 1.4.2** 與 **Bun 1.4.4** 上保持完整。Magpie 插件 host 不受影響；OpenCode 內嵌的 Bun 版本未知，是潛在風險。
+- Bun 1.3.x 上先讀 `res.body` 再 `clone()` 會讓已整包收到的 401 內文變空；外掛改為先 `clone()` 再讀，本機 Bun 1.3.14 與 1.4.4 的單元測試皆確認內文完整。OpenCode 內嵌的 Bun 版本仍未實測。
 - 外掛使用 `Bun.file`、`Bun.write`（`src/limits.ts`），因此只能在 Bun 下執行。
