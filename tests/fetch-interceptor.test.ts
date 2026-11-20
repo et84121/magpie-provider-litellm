@@ -174,6 +174,23 @@ describe("loader fetch / 401 三種結果", () => {
     expect(await res.text()).toBe(payload);
   });
 
+  it("包裝後的 401 保留原內文，並移除過時的 content-length／content-encoding", async () => {
+    const payload = JSON.stringify({ error: { message: "Expired key", type: "expired_key" } });
+    mock = mockUpstream(
+      () =>
+        new Response(payload, {
+          status: 401,
+          headers: { "content-type": "application/json", "content-length": "999", "content-encoding": "gzip" },
+        }),
+    );
+    const res = await (await interceptor())(url);
+
+    expect(res.headers.get("X-Magpie-Sign-In")).toBe("expired");
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect(res.headers.get("content-type")).toBe("application/json");
+    expect(await res.text()).toBe(payload);
+  });
+
   it("上游供應商的憑證被拒不標記 expired", async () => {
     mock = mockUpstream(
       () =>

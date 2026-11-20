@@ -7,7 +7,7 @@
  * 上游供應商錯誤訊息含 <Provider>Exception；部署冷卻與預算 routing 有固定前綴）。
  */
 
-import { readBoundedText } from "./bounded-body.js";
+import { copyHeadersWithoutStaleBody, readBoundedText } from "./bounded-body.js";
 import { isRecord, parseJsonRecord } from "./json.js";
 
 const HTTP_TOO_MANY_REQUESTS = 429;
@@ -15,8 +15,6 @@ const HEADER_RATE_LIMIT_TYPE = "rate_limit_type";
 const HEADER_RATE_LIMITED_BY = "rate_limited_by";
 const HEADER_RETRY_AFTER = "retry-after";
 const JSON_MEDIA_TYPE = /^application\/(?:[\w.+-]+\+)?json$/i;
-// 內文已改寫，舊的長度與編碼標頭不再對應新的 body
-const STALE_BODY_HEADERS = ["content-length", "content-encoding"] as const;
 
 const GATEWAY_PREFIX = "Rate limit exceeded for ";
 const GATEWAY_SCOPE_IN_MESSAGE = /^Rate limit exceeded for (\w+):/;
@@ -266,8 +264,7 @@ export async function enrichRateLimitResponse(res: Response, now: number = Date.
   // 保留原文開頭，避免破壞下游對既有限流前綴的判斷。
   const hinted = { ...body, error: { ...error, message: `${message} [${buildHint(classification, retryAfter)}]` } };
 
-  const headers = new Headers(res.headers);
-  for (const name of STALE_BODY_HEADERS) headers.delete(name);
+  const headers = copyHeadersWithoutStaleBody(res.headers);
   return new Response(JSON.stringify(hinted), {
     status: res.status,
     statusText: res.statusText,

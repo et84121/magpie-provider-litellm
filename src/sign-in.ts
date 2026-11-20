@@ -25,13 +25,13 @@ export enum UnauthorizedOutcome {
   UNDETERMINED = "undetermined",
 }
 
-/** LiteLLM 閘道層級、代表 key 本身失效的錯誤類型（OpenAI 路由放在 error.type，Anthropic 路由放在 litellm_error_type） */
-const KEY_FAILURE_TYPES = new Set(["token_not_found_in_db", "expired_key", "auth_error"]);
+/** LiteLLM 閘道層級、確認代表 key 本身失效的錯誤類型（auth_error 是兜底類型，預算預扣失敗也會用它，不能列入） */
+const KEY_FAILURE_TYPES = new Set(["token_not_found_in_db", "expired_key"]);
 /** 上游供應商的 <Provider>Exception 訊息：是部署上的憑證被拒，不是使用者的登入，不得標記 */
 const UPSTREAM_ORIGIN = /\b[A-Za-z]+Exception\s+-/;
-/** 明確說 token／key／session／sign-in 無效或過期 */
+/** 明確說 token／key／session／sign-in 無效、過期或被封鎖 */
 const INVALID_KEY_WORDING =
-  /\b(?:invalid|expired)\b[^.\n]{0,60}\b(?:token|api[ _-]?key|key|session|sign[ -]?in)\b|\b(?:token|api[ _-]?key|key|session|sign[ -]?in)\b[^.\n]{0,60}\b(?:invalid|expired)\b/i;
+  /\b(?:invalid|expired|blocked)\b[^.\n]{0,60}\b(?:token|api[ _-]?key|key|session|sign[ -]?in)\b|\b(?:token|api[ _-]?key|key|session|sign[ -]?in)\b[^.\n]{0,60}\b(?:invalid|expired|blocked)\b/i;
 /** 只說模型不被提供（model_not_found、model … not available、模型不支持） */
 const MODEL_SPECIFIC_WORDING = /model_not_found|model[^.\n]{0,80}not available|模型不支持/i;
 

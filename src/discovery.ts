@@ -26,10 +26,10 @@ import {
   resolveReasoning,
   UNKNOWN_OUTPUT_FALLBACK,
 } from "./protocol.js";
-import type { ModelProtocolPackage } from "./types.js";
+import { type ModelProtocolPackage, REQUEST_TIMEOUT_MS } from "./types.js";
 
 /** 探索請求的逾時，避免連線黑洞時卡住模型清單 */
-export const DISCOVERY_TIMEOUT_MS = 10_000;
+export const DISCOVERY_TIMEOUT_MS = REQUEST_TIMEOUT_MS;
 
 /** Magpie 模型清單中的一筆（欄位依 Magpie 外掛規範） */
 export interface DiscoveredModel {
@@ -38,8 +38,13 @@ export interface DiscoveredModel {
   decides?: true;
   api: { id: string; url: string; npm: ModelProtocolPackage };
   limit: { context: number; output: number };
-  capabilities: { toolcall: boolean; reasoning: boolean; input: { text: true; image: boolean } };
-  cost?: { input: number; output: number };
+  capabilities: {
+    toolcall: boolean;
+    reasoning: boolean;
+    attachment: boolean;
+    input: { text: true; image: boolean };
+  };
+  cost?: { input: number; output: number; cache: { read: number; write: number } };
 }
 
 export interface DiscoveryOptions {
@@ -154,14 +159,30 @@ function needsExternalLimit(entry: LiteLLMModelInfoEntry): boolean {
 }
 
 /**
- * 依 LiteLLM 的 cost 欄位換算成 Magpie 的每百萬 token 單價；兩者都沒有則不回報
+ * 依 LiteLLM 的 cost 欄位換算成 Magpie 的每百萬 token 單價（含快取讀寫）；四者都沒有則不回報
  * @private
  */
 function costPerMillion(entry: LiteLLMModelInfoEntry): DiscoveredModel["cost"] {
   const input = entry.model_info?.input_cost_per_token;
   const output = entry.model_info?.output_cost_per_token;
-  if (typeof input !== "number" && typeof output !== "number") return undefined;
-  return { input: (input ?? 0) * 1_000_000, output: (output ?? 0) * 1_000_000 };
+  const cacheRead = entry.model_info?.cache_read_input_token_cost;
+  const cacheWrite = entry.model_info?.cache_creation_input_token_cost;
+  if (
+    typeof input !== "number" &&
+    typeof output !== "number" &&
+    typeof cacheRead !== "number" &&
+    typeof cacheWrite !== "number"
+  ) {
+    return undefined;
+  }
+  return {
+    input: (input ?? 0) * 1_000_000,
+    output: (output ?? 0) * 1_000_000,
+    cache: {
+      read: (cacheRead ?? 0) * 1_000_000,
+      write: (cacheWrite ?? 0) * 1_000_000,
+    },
+  };
 }
 
 /**
@@ -186,6 +207,7 @@ function assemble(entry: LiteLLMModelInfoEntry, apiBase: string, external?: Mode
     capabilities: {
       toolcall: !isDecision && info.supports_function_calling !== false,
       reasoning: !isDecision && resolveReasoning(id, entry),
+      attachment: !isDecision && (info.supports_vision === true || info.supports_pdf_input === true),
       input: { text: true, image: !isDecision && info.supports_vision === true },
     },
     ...(cost ? { cost } : {}),
@@ -200,7 +222,7 @@ async function assembleAll(
   rows: LiteLLMModelInfoEntry[],
   options: DiscoveryOptions,
 ): Promise<Record<string, DiscoveredModel>> {
-  const included = rows.filter((row) => !isExcludedModel(row.model_name, row));
+  const included = rows.filter((row) => !isExcludedModel(row));
   const catalog =
     included.some(needsExternalLimit) && options.loadExternal
       ? await options.loadExternal().catch(() => undefined)

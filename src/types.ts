@@ -6,6 +6,9 @@
  * - LiteLLM Key Info: https://docs.litellm.ai/docs/proxy/users_and_keys#key-information
  */
 
+/** 與 LiteLLM / models.dev 通訊的預設 HTTP 逾時（毫秒） */
+export const REQUEST_TIMEOUT_MS = 10_000;
+
 /**
  * 支援的模型通訊協定套件標記
  */

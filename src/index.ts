@@ -4,19 +4,17 @@
  * 支援原生協定路由、動態模型探索、用量預算監控與雙重認證標頭補全。
  */
 
-import { readBoundedText } from "./bounded-body.js";
+import { copyHeadersWithoutStaleBody, readBoundedText } from "./bounded-body.js";
 import { queryLiteLLMBudget } from "./budget.js";
 import { discoverModels } from "./discovery.js";
 import { loadCatalog } from "./limits.js";
 import { getApiBase, getManagementBase, resolveConnection } from "./protocol.js";
 import { enrichRateLimitResponse } from "./rate-limit.js";
 import { classifyUnauthorized, SIGN_IN_HEADER, signInStateFor } from "./sign-in.js";
-import { createTimeoutSignal } from "./timeout.js";
-import { type MagpieStoredAuth, type MagpieUsageResponse, ModelProtocolPackage } from "./types.js";
+import { type MagpieStoredAuth, type MagpieUsageResponse, ModelProtocolPackage, REQUEST_TIMEOUT_MS } from "./types.js";
 
 export const PROVIDER_ID = "litellm";
 const CATALOG_CACHE_PATH = `${process.env.HOME ?? "."}/.cache/magpie-provider-litellm/models-dev.json`;
-const DEFAULT_TIMEOUT_MS = 10000;
 
 /**
  * 取出請求的 URL 字串，支援 Request、URL 與字串三種輸入
@@ -50,7 +48,7 @@ function isAnthropicMessagesUrl(url: string): boolean {
  */
 async function withSignInState(res: Response): Promise<Response> {
   const state = signInStateFor(classifyUnauthorized(await readBoundedText(res)));
-  const headers = new Headers(res.headers);
+  const headers = copyHeadersWithoutStaleBody(res.headers);
   headers.set(SIGN_IN_HEADER, state);
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
@@ -68,31 +66,25 @@ export const LitellmPlugin = async () => ({
       name: "LiteLLM",
       npm: ModelProtocolPackage.OPENAI_COMPATIBLE,
       api: "http://127.0.0.1:4000/v1",
-      decide: true, // 宣告此 Provider 支援 System One 決策／意圖分類 API
       models: {
         "claude-3-7-sonnet": {
           name: "Claude 3.7 Sonnet (Native Messages)",
-          npm: ModelProtocolPackage.ANTHROPIC,
+          provider: { npm: ModelProtocolPackage.ANTHROPIC, api: "http://127.0.0.1:4000/v1" },
           limit: { context: 200000, output: 64000 },
           tool_call: true,
           reasoning: true,
         },
         "gpt-4o": {
           name: "GPT-4o (OpenAI Responses)",
-          npm: ModelProtocolPackage.OPENAI_RESPONSES,
+          provider: { npm: ModelProtocolPackage.OPENAI_RESPONSES, api: "http://127.0.0.1:4000/v1" },
           limit: { context: 128000, output: 4096 },
           tool_call: true,
         },
         "deepseek-chat": {
           name: "DeepSeek Chat (Chat Completions)",
-          npm: ModelProtocolPackage.OPENAI_COMPATIBLE,
+          provider: { npm: ModelProtocolPackage.OPENAI_COMPATIBLE, api: "http://127.0.0.1:4000/v1" },
           limit: { context: 128000, output: 8192 },
           tool_call: true,
-        },
-        "Decision-1": {
-          name: "Decision-1 (Intent Classifier)",
-          decides: true, // 標記為決策分類模型，供 Magpie 意圖路由使用，不對 Agent 暴露一般對話
-          limit: { context: 32768, output: 4096 },
         },
       },
     };
@@ -174,12 +166,7 @@ export const LitellmPlugin = async () => ({
       if (!auth?.key) return { windows: [] };
 
       const { baseURL, apiKey } = resolveConnection(auth);
-      const timeout = createTimeoutSignal(DEFAULT_TIMEOUT_MS);
-      try {
-        return await queryLiteLLMBudget(baseURL, apiKey, timeout.signal);
-      } finally {
-        timeout.dispose();
-      }
+      return queryLiteLLMBudget(baseURL, apiKey, AbortSignal.timeout(REQUEST_TIMEOUT_MS));
     },
   },
 

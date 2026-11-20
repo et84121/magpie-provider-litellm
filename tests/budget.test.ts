@@ -100,10 +100,8 @@ describe("budget / queryLiteLLMBudget", () => {
     expect(user.used).toBeUndefined();
     expect(user.aside).toBe(true);
 
-    // 有上限的 Key 旁邊的累計花費列：同樣只給 display
-    const cumulative = usage.windows.find((w) => w.name === "Key 累計花費")!;
-    expect(cumulative.amount).toBeUndefined();
-    expect(cumulative.aside).toBe(true);
+    // Key 主上限列已呈現總花費，不再重複列出累計花費
+    expect(usage.windows.some((w) => w.name === "Key 累計花費")).toBe(false);
 
     const team = usage.windows.find((w) => w.name === "Team · 每月")!;
     expect(team.limit).toBe(2000);
@@ -301,6 +299,28 @@ describe("budget / queryLiteLLMBudget", () => {
     expect(usage.balance).toBe("最多 $30.00（Team 成員 · 每月，用量未取得）");
   });
 
+  it("團隊預設成員上限：優先讀 /team/info 的 team_member_budget_table", async () => {
+    mockLiteLLM({
+      "/key/info": { info: { spend: 10, user_id: "member-9", team_id: "t-1" } },
+      "/team/info": {
+        team_info: {
+          spend: 100,
+          max_budget: null,
+          team_member_budget: 30,
+          team_member_budget_duration: "30d",
+          team_member_budget_table: { max_budget: 80, budget_duration: "7d" },
+        },
+        team_memberships: [],
+      },
+    });
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+
+    const member = usage.windows.find((w) => w.name === "Team 成員 · 每週")!;
+    expect(member.limit).toBe(80);
+    expect(usage.windows.some((w) => w.name === "Team 成員 · 每月")).toBe(false);
+  });
+
   it("成員個別上限優先於團隊預設", async () => {
     mockLiteLLM({
       "/key/info": { info: { spend: 5, user_id: "member-9", team_id: "t-1" } },
@@ -373,6 +393,16 @@ describe("budget / queryLiteLLMBudget", () => {
     expect(key.limit).toBe(0);
     expect(key.used).toBe(100);
     expect(usage.balance).toBe("$0.00（Key · 上限）");
+  });
+
+  it("超支時百分比照實超過 100，不截斷", async () => {
+    mockLiteLLM({
+      "/key/info": { info: { spend: 150, max_budget: 100, user_id: "u", team_id: null } },
+      "/user/info": { user_info: { spend: 150, max_budget: null } },
+    });
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+    expect(usage.windows.find((w) => w.name === "Key · 上限")!.used).toBe(150);
   });
 
   it("上限為 null 視為無上限，只列花費資訊，不產生進度條", async () => {

@@ -7,11 +7,12 @@
  */
 
 import { z } from "zod";
+import { REQUEST_TIMEOUT_MS } from "./types.js";
 
 export const MODELS_DEV_URL = "https://models.dev/api.json";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** 下載 models.dev 的逾時，避免連線黑洞時卡住模型探索 */
-const DOWNLOAD_TIMEOUT_MS = 10_000;
+const DOWNLOAD_TIMEOUT_MS = REQUEST_TIMEOUT_MS;
 
 /** 只採用這些官方來源，不掃描全目錄（避免同名模型取到他家的值）；順序即查詢優先序 */
 const OFFICIAL_PROVIDERS = ["anthropic", "azure", "zhipuai", "moonshotai"];

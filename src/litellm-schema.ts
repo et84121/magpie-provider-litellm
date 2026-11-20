@@ -23,7 +23,7 @@ const optionalNonNegative = z.number().nonnegative().nullish().catch(undefined);
 export const ModelIdSchema = z
   .string()
   .min(1)
-  .refine((id) => id.trim() === id && id.trim().length > 0 && !id.includes("*"), {
+  .refine((id) => id.trim() === id && !id.includes("*"), {
     message: "模型 ID 不得為空、頭尾含空白或含 wildcard",
   });
 
@@ -36,8 +36,11 @@ const ModelInfoMetaSchema = z.object({
   max_output_tokens: optionalPositive,
   input_cost_per_token: optionalNonNegative,
   output_cost_per_token: optionalNonNegative,
+  cache_read_input_token_cost: optionalNonNegative,
+  cache_creation_input_token_cost: optionalNonNegative,
   supports_function_calling: optionalBoolean,
   supports_vision: optionalBoolean,
+  supports_pdf_input: optionalBoolean,
   supports_reasoning: optionalBoolean,
   supported_endpoints: z.array(z.unknown()).nullish().catch(undefined),
 });

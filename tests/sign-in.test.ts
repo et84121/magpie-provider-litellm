@@ -27,6 +27,13 @@ describe("classifyUnauthorized / 確認的 key 失效", () => {
     const text = JSON.stringify({ error: "model gpt-x not available; the token is invalid" });
     expect(classifyUnauthorized(text)).toBe(UnauthorizedOutcome.KEY_FAILURE);
   });
+
+  it("key 被封鎖的文字判定為 key 失效", () => {
+    const text = JSON.stringify({
+      error: { message: "Authentication Error - Key is blocked. Update via `/key/unblock`" },
+    });
+    expect(classifyUnauthorized(text)).toBe(UnauthorizedOutcome.KEY_FAILURE);
+  });
 });
 
 describe("classifyUnauthorized / 確認的模型專屬失敗", () => {
@@ -63,6 +70,13 @@ describe("classifyUnauthorized / 無法判定", () => {
     const text = JSON.stringify({
       error: { message: "litellm.AuthenticationError: AnthropicException - invalid x-api-key" },
     });
+    expect(classifyUnauthorized(text)).toBe(UnauthorizedOutcome.UNDETERMINED);
+  });
+});
+
+describe("classifyUnauthorized / auth_error 兜底類型", () => {
+  it("只有 auth_error 類型、沒有 key 失效字樣時無法判定（預算預扣失敗等也會用此類型）", () => {
+    const text = JSON.stringify({ error: { message: "Budget reservation failed", type: "auth_error" } });
     expect(classifyUnauthorized(text)).toBe(UnauthorizedOutcome.UNDETERMINED);
   });
 });

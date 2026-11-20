@@ -4,7 +4,6 @@
 
 /**
  * 判斷值是否為普通 JSON 物件（排除 null 與陣列）
- * @private
  */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

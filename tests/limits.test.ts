@@ -2,11 +2,22 @@
  * @fileoverview 測試模型上限查表與 models.dev 快取行為
  */
 
-import { describe, expect, it } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { afterAll, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { candidateLookups, loadCatalog, lookupLimit, type ModelsDevCatalog } from "../src/limits.js";
+
+const tempDirs: string[] = [];
+/** 建立測試用暫存目錄，全部測試結束後一併清除 */
+function dir(): string {
+  const path = mkdtempSync(join(tmpdir(), "limits-"));
+  tempDirs.push(path);
+  return path;
+}
+afterAll(() => {
+  for (const path of tempDirs.splice(0)) rmSync(path, { recursive: true, force: true });
+});
 
 const catalog: ModelsDevCatalog = {
   azure: { models: { "claude-sonnet-5-5": { limit: { context: 1000000, output: 128000 } } } },
@@ -52,7 +63,6 @@ describe("limits / 候選與官方來源", () => {
 });
 
 describe("limits / loadCatalog cache", () => {
-  const dir = () => mkdtempSync(join(tmpdir(), "limits-"));
   const payload = { anthropic: { models: { "claude-x": { limit: { context: 1, output: 2 } } } } };
 
   it("快取未過期時不呼叫網路", async () => {
@@ -124,7 +134,6 @@ describe("limits / loadCatalog cache", () => {
 });
 
 describe("limits / loadCatalog 快取驗證與投影", () => {
-  const dir = () => mkdtempSync(join(tmpdir(), "limits-"));
   const payload = { anthropic: { models: { "claude-x": { limit: { context: 1, output: 2 } } } } };
   const fresh = () => 1000;
 

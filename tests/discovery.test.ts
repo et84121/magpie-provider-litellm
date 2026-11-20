@@ -180,6 +180,37 @@ describe("discovery / 列級容錯與 ID 驗證", () => {
     expect(m1.limit).toEqual({ context: 128000, output: 8000 });
   });
 
+  it("單價換算為每百萬 token，含快取讀寫；圖片或 PDF 輸入開啟 attachment", async () => {
+    const gw = fakeGateway({
+      "/model/info": () =>
+        json({
+          data: [
+            {
+              model_name: "vision",
+              model_info: {
+                input_cost_per_token: 0.000003,
+                output_cost_per_token: 0.000015,
+                cache_read_input_token_cost: 0.0000003,
+                cache_creation_input_token_cost: 0.00000375,
+                supports_vision: true,
+              },
+            },
+            { model_name: "pdf", model_info: { cache_read_input_token_cost: 0.000001, supports_pdf_input: true } },
+            { model_name: "plain", model_info: {} },
+          ],
+        }),
+    });
+    const models = (await discover(gw.base))!;
+
+    expect(models["vision"].cost).toEqual({ input: 3, output: 15, cache: { read: 0.3, write: 3.75 } });
+    expect(models["vision"].capabilities.attachment).toBe(true);
+    expect(models["pdf"].cost).toEqual({ input: 0, output: 0, cache: { read: 1, write: 0 } });
+    expect(models["pdf"].capabilities.attachment).toBe(true);
+    expect(models["pdf"].capabilities.input.image).toBe(false);
+    expect(models["plain"].cost).toBeUndefined();
+    expect(models["plain"].capabilities.attachment).toBe(false);
+  });
+
   it("同名多個部署的上限取最小值，與列的順序無關", async () => {
     const gw = fakeGateway({
       "/model/info": () =>
@@ -236,7 +267,7 @@ describe("discovery / 路由與決策模型", () => {
     expect(gw.seen.map((s) => s.path)).toEqual(["/model/info"]);
   });
 
-  it("語音、OCR、realtime 等明確非對話 mode 同樣略過；未列入的 mode 不靠猜測排除", async () => {
+  it("語音、OCR、realtime、rerank 等明確非對話 mode 同樣略過；未列入的 mode 不靠猜測排除", async () => {
     const gw = fakeGateway({
       "/model/info": () =>
         json({
@@ -245,7 +276,11 @@ describe("discovery / 路由與決策模型", () => {
             { model_name: "tts", model_info: { mode: "audio_speech" } },
             { model_name: "ocr", model_info: { mode: "ocr" } },
             { model_name: "rt", model_info: { mode: "realtime" } },
-            { model_name: "odd", model_info: { mode: "extraction" } },
+            { model_name: "ext", model_info: { mode: "extraction" } },
+            { model_name: "rr", model_info: { mode: "rerank" } },
+            { model_name: "mod", model_info: { mode: "moderation" } },
+            { model_name: "legacy", model_info: { mode: "completion" } },
+            { model_name: "odd", model_info: { mode: "some_future_mode" } },
           ],
         }),
     });
