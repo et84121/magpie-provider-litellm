@@ -10,7 +10,8 @@
     "package.json"
   ],
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "lint": "oxlint --config .oxlintrc.json src tests"
   },
   "keywords": [
     "magpie",
@@ -30,6 +31,7 @@
     "maxConcurrency": 10
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "1.4.4",
+    "oxlint": "1.92.0"
   }
 }
