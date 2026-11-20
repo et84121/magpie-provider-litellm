@@ -480,3 +480,84 @@ describe("budget / 實機 fixture（脫敏）", () => {
     expect(member?.amount).toBe(10);
   });
 });
+
+describe("budget / TPM 設定上限顯示列", () => {
+  /** 團隊金鑰的基本回應：Key 週上限用來驗證 TPM 不影響預算。
+   * @private
+   */
+  function teamKeyRoutes(keyTpm: unknown, teamTpm: unknown) {
+    return {
+      "/key/info": {
+        info: { spend: 38.08, max_budget: 100, budget_duration: "7d", user_id: "u-1", team_id: "t-1", tpm_limit: keyTpm },
+      },
+      "/user/info": { user_info: { spend: 10 } },
+      "/team/info": { team_info: { spend: 238.7, max_budget: 2000, budget_duration: "30d", tpm_limit: teamTpm }, team_memberships: [] },
+    };
+  }
+
+  it("有效設定：Key 與 Team 的 TPM 各列一條純顯示視窗，tokens 千分位顯示", async () => {
+    mockLiteLLM(teamKeyRoutes(1000000, 2500000));
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+
+    const keyTpm = usage.windows.find((w) => w.name === "LiteLLM Key TPM 設定上限")!;
+    expect(keyTpm.display).toBe("1,000,000 tokens/分鐘");
+    expect(keyTpm.aside).toBe(true);
+
+    const teamTpm = usage.windows.find((w) => w.name === "LiteLLM Team TPM 設定上限")!;
+    expect(teamTpm.display).toBe("2,500,000 tokens/分鐘");
+    expect(teamTpm.aside).toBe(true);
+  });
+
+  it("TPM 列不帶 amount、limit、used、resetsAt、span，避免被當成即時用量或進度條", async () => {
+    mockLiteLLM(teamKeyRoutes(1000000, 2500000));
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+
+    for (const name of ["LiteLLM Key TPM 設定上限", "LiteLLM Team TPM 設定上限"]) {
+      const row = usage.windows.find((w) => w.name === name)!;
+      expect(row.amount).toBeUndefined();
+      expect(row.limit).toBeUndefined();
+      expect(row.used).toBeUndefined();
+      expect(row.resetsAt).toBeUndefined();
+      expect(row.span).toBeUndefined();
+    }
+  });
+
+  it("缺值或無效值不顯示，也不當成 0", async () => {
+    for (const invalid of [null, undefined, 0, -5, 1.5, Number.MAX_SAFE_INTEGER + 1, "2000000"]) {
+      mockLiteLLM(teamKeyRoutes(invalid, invalid));
+
+      const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+
+      expect(usage.windows.some((w) => w.name.includes("TPM"))).toBe(false);
+    }
+  });
+
+  it("團隊讀取失敗時不顯示 Team TPM 列，Key TPM 仍顯示", async () => {
+    mockLiteLLM({
+      "/key/info": { info: { spend: 1, team_id: "t-1", tpm_limit: 500000 } },
+      "/team/info": httpError(500),
+    });
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+
+    expect(usage.windows.find((w) => w.name === "LiteLLM Key TPM 設定上限")?.display).toBe("500,000 tokens/分鐘");
+    expect(usage.windows.some((w) => w.name === "LiteLLM Team TPM 設定上限")).toBe(false);
+    expect(usage.windows.find((w) => w.name === "Team（讀取失敗）")).toBeDefined();
+  });
+
+  it("TPM 設定不影響美元 budget：剩餘額度、排序與其他視窗與沒有 TPM 時完全相同", async () => {
+    mockLiteLLM(teamKeyRoutes(null, null));
+    const without = await queryLiteLLMBudget("http://localhost:4000", "k");
+
+    mockLiteLLM(teamKeyRoutes(1000000, 2500000));
+    const withTpm = await queryLiteLLMBudget("http://localhost:4000", "k");
+
+    const budgetWindows = withTpm.windows.filter((w) => !w.name.includes("TPM"));
+    expect(withTpm.balance).toBe(without.balance);
+    expect(withTpm.balance).toBe("$61.92（Key · 每週）");
+    expect(budgetWindows).toEqual(without.windows);
+    expect(withTpm.windows[0].name).toBe("Key · 每週");
+  });
+});
