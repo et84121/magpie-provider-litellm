@@ -15,33 +15,7 @@ export enum ModelProtocolPackage {
   OPENAI_RESPONSES = "@ai-sdk/openai",
 }
 
-/**
- * LiteLLM /model/info 回傳項目
- * 規格出處：https://docs.litellm.ai/docs/proxy/model_management
- */
-export interface LiteLLMModelInfoEntry {
-  model_name?: string;
-  litellm_params?: {
-    model?: string;
-    custom_llm_provider?: string;
-    api_base?: string;
-  };
-  model_info?: {
-    base_model?: string;
-    litellm_provider?: string;
-    mode?: string;
-    max_tokens?: number;
-    max_input_tokens?: number;
-    max_output_tokens?: number;
-    input_cost_per_token?: number;
-    output_cost_per_token?: number;
-    supports_function_calling?: boolean;
-    supports_vision?: boolean;
-    supports_reasoning?: boolean;
-    // 外部資料，型別保守為 unknown；消費端以 Array.isArray 與 typeof 判斷元素
-    supported_endpoints?: unknown[];
-  };
-}
+export type { LiteLLMModelInfoEntry } from "./litellm-schema.js";
 
 /**
  * Magpie 帳號認證儲存中繼資料

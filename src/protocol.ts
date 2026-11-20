@@ -2,7 +2,8 @@
  * @fileoverview LiteLLM 端點位址解析與模型原生通訊協定推導工具
  */
 
-import { type LiteLLMModelInfoEntry, ModelProtocolPackage } from "./types.js";
+import type { LiteLLMModelInfoEntry } from "./litellm-schema.js";
+import { ModelProtocolPackage } from "./types.js";
 
 // 模式識別正規表達式
 const CLAUDE_PATTERN = /(?:^|[./_-])(?:anthropic|claude|opus|sonnet|haiku)(?:$|[./_:-])/i;
@@ -10,6 +11,23 @@ const OPENSOURCE_PATTERN =
   /(?:deepseek|kimi|moonshot|glm|zhipu|qwen|minimax|mistral|codestral|llama|nemotron|grok|yi|baichuan)/i;
 const OPENAI_RESPONSES_PATTERN =
   /(?:^(?:ft:)?|[./_-])(?:gpt-[56789]|gpt-4o|gpt-4\.5|gpt-chat|o1|o3|o4|codex)(?:$|[./_:-])/i;
+
+/**
+ * 明確宣告為非 chat completions 任務的 mode（LiteLLM ModelInfoBase.mode 的子集）。
+ * 只排除有明確 mode 證據的模型；未知或缺漏的 mode 仍視為對話模型，不靠名稱猜測。
+ * @private
+ */
+const NON_CHAT_MODES = new Set([
+  "embedding",
+  "image_generation",
+  "audio_transcription",
+  "audio_speech",
+  "ocr",
+  "realtime",
+]);
+
+/** 名稱推論推理模型的樣式，只在沒有 supports_reasoning 證據時才用 */
+const REASONING_NAME_PATTERN = /deepseek-reasoner|(?:^|[-_./])(?:o1|o3|o4|r1)(?:$|[-_./])/i;
 
 /**
  * 清理並移除 URL 尾端多餘的斜線
@@ -73,11 +91,12 @@ export function isDecisionModel(modelId: string, item?: LiteLLMModelInfoEntry): 
 }
 
 /**
- * 判斷是否為應排除的非對話模型（如 embedding、圖片生成等）
+ * 判斷是否為應排除的非對話模型（如 embedding、圖片生成、語音等）。
+ * 只看 model_info.mode 這個明確證據，不看模型名稱。
  */
 export function isExcludedModel(modelId: string, item?: LiteLLMModelInfoEntry): boolean {
   const mode = (item?.model_info?.mode || "").toLowerCase();
-  return mode === "embedding" || mode === "image_generation";
+  return NON_CHAT_MODES.has(mode);
 }
 
 /**
@@ -118,28 +137,48 @@ function positiveNumber(value: number | null | undefined): number | undefined {
  * 最後外部目錄。三者都沒有則回傳 undefined，讓呼叫端能判斷是否用了保底。
  */
 export function knownOutputLimit(
-  info: { max_output_tokens?: number | null; max_tokens?: number | null } = {},
+  info?: { max_output_tokens?: number | null; max_tokens?: number | null } | null,
   catalogOutput?: number,
 ): number | undefined {
-  return positiveNumber(info.max_output_tokens) ?? positiveNumber(info.max_tokens) ?? positiveNumber(catalogOutput);
+  return positiveNumber(info?.max_output_tokens) ?? positiveNumber(info?.max_tokens) ?? positiveNumber(catalogOutput);
 }
 
 /**
  * 決定輸出上限：已知值優先，查不到才用保底。不依模型族系猜測，避免把其他模型的值誤套上去。
  */
 export function resolveOutputLimit(
-  info: { max_output_tokens?: number | null; max_tokens?: number | null } = {},
+  info?: { max_output_tokens?: number | null; max_tokens?: number | null } | null,
   catalogOutput?: number,
 ): number {
   return knownOutputLimit(info, catalogOutput) ?? UNKNOWN_OUTPUT_FALLBACK;
 }
 
 /**
- * 決定上下文上限：上游 max_input_tokens 優先，其次外部目錄，最後保底。
- * 不使用 max_tokens：它在 LiteLLM 的文件中是輸出上限（legacy），用來當上下文會把輸出值誤當成上下文。
+ * 已知的上下文上限：只看上游 max_input_tokens。不使用 max_tokens：它在 LiteLLM 的文件中是輸出上限（legacy），
+ * 用來當上下文會把輸出值誤當成上下文。
  */
-export function resolveContextLimit(info: { max_input_tokens?: number | null } = {}, catalogContext?: number): number {
-  return positiveNumber(info.max_input_tokens) ?? positiveNumber(catalogContext) ?? UNKNOWN_CONTEXT_FALLBACK;
+export function knownContextLimit(info?: { max_input_tokens?: number | null } | null): number | undefined {
+  return positiveNumber(info?.max_input_tokens);
+}
+
+/**
+ * 決定上下文上限：上游 max_input_tokens 優先，其次外部目錄，最後保底。
+ */
+export function resolveContextLimit(
+  info?: { max_input_tokens?: number | null } | null,
+  catalogContext?: number,
+): number {
+  return knownContextLimit(info) ?? positiveNumber(catalogContext) ?? UNKNOWN_CONTEXT_FALLBACK;
+}
+
+/**
+ * 判斷是否支援推理：明確的 supports_reasoning 優先（包含 false），其次 mode，最後才看名稱。
+ */
+export function resolveReasoning(modelId: string, item?: LiteLLMModelInfoEntry): boolean {
+  const explicit = item?.model_info?.supports_reasoning;
+  if (typeof explicit === "boolean") return explicit;
+  if ((item?.model_info?.mode || "").toLowerCase() === "reasoning") return true;
+  return REASONING_NAME_PATTERN.test(modelId);
 }
 
 /**
