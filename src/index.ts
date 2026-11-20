@@ -224,7 +224,9 @@ export const LitellmPlugin = async () => ({
           if (validEntries.length > 0) {
             const mapped: Record<string, any> = {};
             // 只有某個模型缺少上游明確上限時才需要外部目錄（惰性載入，避免每次探索都讀快取）
-            const needsCatalog = validEntries.some((e) => !e.model_info?.max_input_tokens || !e.model_info?.max_output_tokens);
+            const needsCatalog = validEntries.some(
+              (e) => !e.model_info?.max_input_tokens || !e.model_info?.max_output_tokens,
+            );
             const catalog: ModelsDevCatalog | undefined = needsCatalog
               ? await loadCatalog(CATALOG_CACHE_PATH).catch(() => undefined)
               : undefined;
@@ -238,7 +240,7 @@ export const LitellmPlugin = async () => ({
               // 排除非對話任務模型（如 embedding、image_generation）避免 Agent 誤選崩潰
               if (isExcludedModel(modelId, item)) {
                 continue;
-              } 
+              }
 
               const isDecision = isDecisionModel(modelId, item);
               const protocolNpm = resolveModelProtocol(modelId, item);
@@ -288,7 +290,10 @@ export const LitellmPlugin = async () => ({
               };
             }
 
-            if (missingLimit.length) console.warn(`[magpie-provider-litellm] 無法取得輸出上限，使用保底 ${UNKNOWN_OUTPUT_FALLBACK}：${missingLimit.join(", ")}`);
+            if (missingLimit.length)
+              console.warn(
+                `[magpie-provider-litellm] 無法取得輸出上限，使用保底 ${UNKNOWN_OUTPUT_FALLBACK}：${missingLimit.join(", ")}`,
+              );
             return mapped;
           }
         }

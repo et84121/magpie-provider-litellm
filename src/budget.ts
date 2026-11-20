@@ -106,7 +106,9 @@ interface Part {
  */
 export function parseDurationToSeconds(duration?: string): number | undefined {
   if (!duration) return undefined;
-  const match = String(duration).trim().match(/^(\d+)([dhms])$/i);
+  const match = String(duration)
+    .trim()
+    .match(/^(\d+)([dhms])$/i);
   if (!match) return undefined;
   const val = Number(match[1]);
   const unit = match[2].toLowerCase();
@@ -227,9 +229,7 @@ function unknownUsagePart(name: string, max: number, duration: string, enforced:
  */
 function spendPart(scope: Scope, capped: boolean): Part {
   const useCumulative = capped || !scope.duration;
-  const name = useCumulative
-    ? `${scope.level} 累計花費`
-    : `${scope.level} · ${formatPeriod(scope.duration)} 花費`;
+  const name = useCumulative ? `${scope.level} 累計花費` : `${scope.level} · ${formatPeriod(scope.duration)} 花費`;
   return {
     window: { name, display: `$${scope.spend.toFixed(2)}`, aside: true },
     rank: 2,
@@ -343,7 +343,9 @@ function modelSummaryWindow(scopes: Scope[]): MagpieUsageWindow | undefined {
       if (!Number.isFinite(limit) || limit <= 0) continue;
       const spent = typeof usage.current_spend === "number" ? usage.current_spend : 0;
       const period = formatPeriod(usage.time_period);
-      parts.push(`${scope.level} · ${model} $${limit.toFixed(2)}${period ? ` ${period}` : ""}（已用 $${spent.toFixed(2)}）`);
+      parts.push(
+        `${scope.level} · ${model} $${limit.toFixed(2)}${period ? ` ${period}` : ""}（已用 $${spent.toFixed(2)}）`,
+      );
     }
   }
   if (parts.length === 0) return undefined;
@@ -412,7 +414,11 @@ export async function queryLiteLLMBudget(
 
   const [userRes, teamRes] = await Promise.all([
     userId
-      ? getJson<{ user_info?: BudgetBlock }>(`${rootUrl}/user/info?user_id=${encodeURIComponent(userId)}`, headers, signal)
+      ? getJson<{ user_info?: BudgetBlock }>(
+          `${rootUrl}/user/info?user_id=${encodeURIComponent(userId)}`,
+          headers,
+          signal,
+        )
       : Promise.resolve(undefined),
     teamId
       ? getJson<TeamInfoResponse>(`${rootUrl}/team/info?team_id=${encodeURIComponent(teamId)}`, headers, signal)
@@ -437,7 +443,9 @@ export async function queryLiteLLMBudget(
   if (teamInfo) {
     scopes.push(toScope("Team", teamInfo, teamInfo.spend ?? 0, true));
     const membership = userId ? teamRes?.team_memberships?.find((m) => m.user_id === userId) : undefined;
-    const member = userId ? effectiveMemberBlock(membership?.litellm_budget_table, teamDefaultBlock(teamInfo)) : undefined;
+    const member = userId
+      ? effectiveMemberBlock(membership?.litellm_budget_table, teamDefaultBlock(teamInfo))
+      : undefined;
     if (member) scopes.push(toScope("Team 成員", member, membership?.spend ?? 0, true));
   }
 
