@@ -293,10 +293,12 @@ describe("budget / queryLiteLLMBudget", () => {
 
     const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
 
+    // team_memberships 沒有該成員的列 → 花費未知，不以 0 計；上限仍是團隊預設，剩餘額度以上限為上界
     const member = usage.windows.find((w) => w.name === "Team 成員 · 每月")!;
     expect(member.limit).toBe(30);
-    expect(member.amount).toBe(0);
-    expect(usage.balance).toBe("$30.00（Team 成員 · 每月）");
+    expect(member.amount).toBeUndefined();
+    expect(member.used).toBeUndefined();
+    expect(usage.balance).toBe("最多 $30.00（Team 成員 · 每月，用量未取得）");
   });
 
   it("成員個別上限優先於團隊預設", async () => {
@@ -360,10 +362,23 @@ describe("budget / queryLiteLLMBudget", () => {
     expect(usage.error).toBe("無法取得 LiteLLM 金鑰資訊");
   });
 
-  it("預算上限為 0 或 null 視為無上限，不產生進度條", async () => {
+  it("上限為 0 是真的 $0 上限（LiteLLM 會擋請求）：已用盡、剩餘 $0；null 才是無上限", async () => {
     mockLiteLLM({
       "/key/info": { info: { spend: 1, max_budget: 0, user_id: "u", team_id: null } },
-      "/user/info": { user_info: { spend: 1, max_budget: 0, budget_duration: "30d" } },
+      "/user/info": { user_info: { spend: 1, max_budget: null, budget_duration: "30d" } },
+    });
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+    const key = usage.windows.find((w) => w.name === "Key · 上限")!;
+    expect(key.limit).toBe(0);
+    expect(key.used).toBe(100);
+    expect(usage.balance).toBe("$0.00（Key · 上限）");
+  });
+
+  it("上限為 null 視為無上限，只列花費資訊，不產生進度條", async () => {
+    mockLiteLLM({
+      "/key/info": { info: { spend: 1, max_budget: null, user_id: "u", team_id: null } },
+      "/user/info": { user_info: { spend: 1, max_budget: null, budget_duration: "30d" } },
     });
 
     const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
@@ -569,5 +584,134 @@ describe("budget / TPM 設定上限顯示列", () => {
     expect(withTpm.balance).toBe("$61.92（Key · 每週）");
     expect(budgetWindows).toEqual(without.windows);
     expect(withTpm.windows[0].name).toBe("Key · 每週");
+  });
+});
+
+describe("budget / 驗證邊界：缺值、格式錯誤與部分讀取失敗", () => {
+  it("缺少 spend 時用量未取得，不以 0 計：上限以 limit 為上界並標示「最多」", async () => {
+    mockLiteLLM({
+      "/key/info": { info: { max_budget: 100, budget_duration: "7d", user_id: "u", team_id: null } },
+    });
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+    const key = usage.windows.find((w) => w.name === "Key · 每週")!;
+    expect(key.limit).toBe(100);
+    expect(key.amount).toBeUndefined();
+    expect(key.used).toBeUndefined();
+    expect(usage.balance).toBe("最多 $100.00（Key · 每週，用量未取得）");
+  });
+
+  it("明確的 0 花費仍是有效用量：顯示 0%，剩餘額度為完整上限", async () => {
+    mockLiteLLM({
+      "/key/info": { info: { spend: 0, max_budget: 100, budget_duration: "7d", user_id: null, team_id: null } },
+    });
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+    const key = usage.windows.find((w) => w.name === "Key · 每週")!;
+    expect(key.amount).toBe(0);
+    expect(key.used).toBe(0);
+    expect(usage.balance).toBe("$100.00（Key · 每週）");
+  });
+
+  it("花費格式錯誤（字串）的使用者層讀取失敗：列出讀取失敗且剩餘額度不宣稱為已知", async () => {
+    mockLiteLLM({
+      "/key/info": { info: { spend: 1, user_id: "alice", team_id: null } },
+      "/user/info": { user_info: { spend: "12", max_budget: 500, budget_duration: "30d" } },
+    });
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+    expect(usage.windows.some((w) => w.name === "User（讀取失敗）")).toBe(true);
+    expect(usage.windows.some((w) => w.name === "User · 每月")).toBe(false);
+    expect(usage.balance).toBe("剩餘額度未知（部分預算讀取失敗）");
+  });
+
+  it("無法解析的 duration：保留上限與標籤，但不產生 span；0d 也不產生 span", async () => {
+    mockLiteLLM({
+      "/key/info": { info: { spend: 10, max_budget: 100, budget_duration: "abc", user_id: "u", team_id: null } },
+    });
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+    const key = usage.windows.find((w) => w.name === "Key · 每 abc")!;
+    expect(key.limit).toBe(100);
+    expect(key.span).toBeUndefined();
+
+    expect(parseDurationToSeconds("0d")).toBeUndefined();
+    expect(parseDurationToSeconds("1w")).toBe(604800);
+    expect(parseDurationToSeconds("1mo")).toBeUndefined();
+    expect(formatPeriod("1w")).toBe("每週");
+  });
+
+  it("budget_limits 單一條目格式錯誤：其餘有效視窗照常顯示，剩餘額度標示「最多」與部分失敗", async () => {
+    mockLiteLLM({
+      "/key/info": {
+        info: {
+          spend: 3,
+          user_id: "u",
+          team_id: null,
+          budget_limits: [
+            { budget_duration: "24h", max_budget: 10 },
+            { budget_duration: 5, max_budget: 10 },
+            { budget_duration: "30d", max_budget: "x" },
+          ],
+          budget_limits_usage: { "24h": { current_spend: 3 } },
+        },
+      },
+    });
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+    expect(usage.windows.some((w) => w.name === "Key · 每日" && w.used === 30)).toBe(true);
+    expect(usage.windows.some((w) => w.name === "Key（部分視窗讀取失敗）")).toBe(true);
+    expect(usage.balance).toBe("最多 $7.00（Key · 每日）");
+  });
+
+  it("團隊層讀取失敗時，Key 層仍顯示；團隊與成員列為讀取失敗，剩餘額度不宣稱為已知", async () => {
+    mockLiteLLM({
+      "/key/info": {
+        info: { spend: 38, max_budget: 100, budget_duration: "7d", user_id: "member-10", team_id: "t-1" },
+      },
+      "/user/info": { user_info: { spend: 99, max_budget: 200, budget_duration: "30d" } },
+      "/team/info": httpError(500),
+    });
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+    expect(usage.windows.some((w) => w.name === "Key · 每週" && w.used === 38)).toBe(true);
+    expect(usage.windows.some((w) => w.name === "Team（讀取失敗）")).toBe(true);
+    expect(usage.windows.some((w) => w.name === "Team 成員（讀取失敗）")).toBe(true);
+    expect(usage.balance).toBe("最多 $62.00（Key · 每週）");
+  });
+
+  it("成員列格式錯誤：成員層列為讀取失敗，不套用團隊預設", async () => {
+    mockLiteLLM({
+      "/key/info": { info: { spend: 5, user_id: "member-9", team_id: "t-1" } },
+      "/team/info": {
+        team_info: { spend: 100, max_budget: null, team_member_budget: 30, team_member_budget_duration: "30d" },
+        team_memberships: [{ user_id: "member-9", spend: "5", litellm_budget_table: null }],
+      },
+    });
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+    expect(usage.windows.some((w) => w.name === "Team 成員（讀取失敗）")).toBe(true);
+    expect(usage.windows.some((w) => w.name === "Team 成員 · 每月")).toBe(false);
+  });
+
+  it("per-model 條目缺少 current_spend 顯示已用量未取得，無效 limit 則略過並標示", async () => {
+    mockLiteLLM({
+      "/key/info": {
+        info: {
+          spend: 1,
+          user_id: "u",
+          team_id: null,
+          model_max_budget_usage: {
+            "claude-a": { budget_limit: 50, time_period: "1d" },
+            "claude-b": { current_spend: 2, budget_limit: "not-a-number", time_period: "1d" },
+          },
+        },
+      },
+    });
+
+    const usage = await queryLiteLLMBudget("http://localhost:4000", "k");
+    const models = usage.windows.find((w) => w.name === "模型額度")!;
+    expect(models.display).toContain("claude-a $50.00 每日（已用量未取得）");
+    expect(models.display).toContain("部分模型額度格式錯誤");
+    expect(models.display).not.toContain("claude-b");
   });
 });
