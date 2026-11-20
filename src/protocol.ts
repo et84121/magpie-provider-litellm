@@ -3,7 +3,7 @@
  */
 
 import type { LiteLLMModelInfoEntry } from "./litellm-schema.js";
-import { ModelProtocolPackage } from "./types.js";
+import { ModelProtocolPackage, type MagpieStoredAuth } from "./types.js";
 
 // 模式識別正規表達式
 const CLAUDE_PATTERN = /(?:^|[./_-])(?:anthropic|claude|opus|sonnet|haiku)(?:$|[./_:-])/i;
@@ -53,28 +53,45 @@ export function getApiBase(url: string): string {
   return cleaned.endsWith("/v1") ? cleaned : `${cleaned}/v1`;
 }
 
+/** 未設定任何 Base URL 時的最後預設值 */
+export const DEFAULT_BASE_URL = "http://127.0.0.1:4000";
+
+const COMPOSITE_KEY_PATTERN = /^(https?:\/\/[^\s,#|]+)[\s,#|]+(.+)$/i;
+
+/** 解析後的連線設定：baseURL 已去除尾端斜線，可能含 /v1，由呼叫端決定管理端或 API 端 */
+export interface LiteLLMConnection {
+  baseURL: string;
+  apiKey: string;
+}
+
 /**
- * 解析使用者輸入之認證字串
+ * 解析貼在 key 欄位的複合格式「URL 分隔符 key」（例如 `https://litellm.internal sk-…`）。
+ * 不符合時回傳 undefined，代表 key 欄位就是單純的 API key。
  */
-export function parseLoginInput(
-  raw: string,
-  defaultBase = "http://127.0.0.1:4000",
-): { baseURL: string; apiKey: string } {
-  const text = raw.trim();
-  const splitMatch = text.match(/^(https?:\/\/[^\s,#|]+)[\s,#|]+(.+)$/i);
+export function parseCompositeKey(raw: string): LiteLLMConnection | undefined {
+  const match = raw.trim().match(COMPOSITE_KEY_PATTERN);
+  if (!match) return undefined;
+  return { baseURL: cleanUrl(match[1]), apiKey: match[2].trim() };
+}
 
-  if (splitMatch) {
-    return {
-      baseURL: cleanUrl(splitMatch[1]),
-      apiKey: splitMatch[2].trim(),
-    };
-  }
+/**
+ * 解析 Base URL 與 API key，三個 hooks（loader、usage、models）共用這一處決定。
+ * 優先序（高到低）：
+ * 1. key 欄位的複合格式：URL 與 key 同一次貼上，是這筆輸入的明確指定
+ * 2. 登入時儲存的 metadata.baseURL
+ * 3. 環境變數 LITELLM_BASE_URL（每次呼叫時讀取）
+ * 4. DEFAULT_BASE_URL
+ * 空白字串視為未設定。
+ */
+export function resolveConnection(
+  auth: MagpieStoredAuth,
+  envBaseURL: string | undefined = process.env.LITELLM_BASE_URL,
+): LiteLLMConnection {
+  const composite = parseCompositeKey(auth.key);
+  if (composite) return composite;
 
-  const envBase = typeof process !== "undefined" ? process.env?.LITELLM_BASE_URL : undefined;
-  return {
-    baseURL: cleanUrl(envBase || defaultBase),
-    apiKey: text,
-  };
+  const configured = auth.metadata?.baseURL?.trim() || envBaseURL?.trim() || DEFAULT_BASE_URL;
+  return { baseURL: cleanUrl(configured), apiKey: auth.key.trim() };
 }
 
 /**

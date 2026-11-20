@@ -7,23 +7,14 @@
 import { queryLiteLLMBudget } from "./budget.js";
 import { discoverModels } from "./discovery.js";
 import { loadCatalog } from "./limits.js";
-import { getApiBase, getManagementBase, parseLoginInput } from "./protocol.js";
+import { getApiBase, getManagementBase, resolveConnection } from "./protocol.js";
 import { enrichRateLimitResponse } from "./rate-limit.js";
+import { createTimeoutSignal } from "./timeout.js";
 import { type MagpieStoredAuth, type MagpieUsageResponse, ModelProtocolPackage } from "./types.js";
 
 export const PROVIDER_ID = "litellm";
 const CATALOG_CACHE_PATH = `${process.env.HOME ?? "."}/.cache/magpie-provider-litellm/models-dev.json`;
 const DEFAULT_TIMEOUT_MS = 10000;
-
-/**
- * 建立具備逾時防護的 AbortSignal
- * @private
- */
-function createTimeoutSignal(ms = DEFAULT_TIMEOUT_MS): AbortSignal {
-  const controller = new AbortController();
-  setTimeout(() => controller.abort(), ms);
-  return controller.signal;
-}
 
 /**
  * Magpie LiteLLM 外掛主函式
@@ -108,20 +99,11 @@ export const LitellmPlugin = async () => ({
       const auth = await getAuth();
       if (!auth) return {};
 
-      // 若使用者在 key 欄位不小心貼上了包含 URL 的複合格式，自動解析兼顧
-      let rawBase = auth.metadata?.baseURL || "http://127.0.0.1:4000";
-      let apiKey = auth.key;
-
-      if (apiKey && apiKey.includes("http")) {
-        const parsed = parseLoginInput(apiKey, rawBase);
-        rawBase = parsed.baseURL;
-        apiKey = parsed.apiKey;
-      }
-
-      const baseURL = getApiBase(rawBase);
+      const connection = resolveConnection(auth);
+      const apiKey = connection.apiKey;
 
       return {
-        baseURL,
+        baseURL: getApiBase(connection.baseURL),
         apiKey,
         async fetch(input: RequestInfo | URL, init?: RequestInit) {
           const headers = new Headers(init?.headers);
@@ -164,16 +146,13 @@ export const LitellmPlugin = async () => ({
       const auth = await getAuth();
       if (!auth?.key) return { windows: [] };
 
-      let rawBase = auth.metadata?.baseURL || "http://127.0.0.1:4000";
-      let apiKey = auth.key;
-      if (apiKey && apiKey.includes("http")) {
-        const parsed = parseLoginInput(apiKey, rawBase);
-        rawBase = parsed.baseURL;
-        apiKey = parsed.apiKey;
+      const { baseURL, apiKey } = resolveConnection(auth);
+      const timeout = createTimeoutSignal(DEFAULT_TIMEOUT_MS);
+      try {
+        return await queryLiteLLMBudget(baseURL, apiKey, timeout.signal);
+      } finally {
+        timeout.dispose();
       }
-
-      const signal = createTimeoutSignal();
-      return queryLiteLLMBudget(rawBase, apiKey, signal);
     },
   },
 
@@ -185,17 +164,10 @@ export const LitellmPlugin = async () => ({
     async models(provider: any, { auth }: { auth?: MagpieStoredAuth } = {}) {
       if (!auth?.key) return provider.models;
 
-      let rawBase = auth.metadata?.baseURL || "http://127.0.0.1:4000";
-      let apiKey = auth.key;
-      if (apiKey && apiKey.includes("http")) {
-        const parsed = parseLoginInput(apiKey, rawBase);
-        rawBase = parsed.baseURL;
-        apiKey = parsed.apiKey;
-      }
-
+      const { baseURL, apiKey } = resolveConnection(auth);
       const discovered = await discoverModels({
-        rootUrl: getManagementBase(rawBase),
-        apiBase: getApiBase(rawBase),
+        rootUrl: getManagementBase(baseURL),
+        apiBase: getApiBase(baseURL),
         apiKey,
         loadExternal: () => loadCatalog(CATALOG_CACHE_PATH),
       });

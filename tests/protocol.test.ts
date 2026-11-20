@@ -5,11 +5,13 @@
 import { describe, expect, it } from "bun:test";
 import {
   cleanUrl,
+  DEFAULT_BASE_URL,
   getApiBase,
   getManagementBase,
   isDecisionModel,
   isExcludedModel,
-  parseLoginInput,
+  parseCompositeKey,
+  resolveConnection,
   resolveModelProtocol,
   knownOutputLimit,
   resolveContextLimit,
@@ -17,7 +19,7 @@ import {
   UNKNOWN_CONTEXT_FALLBACK,
   UNKNOWN_OUTPUT_FALLBACK,
 } from "../src/protocol.js";
-import { ModelProtocolPackage } from "../src/types.js";
+import { ModelProtocolPackage, type MagpieStoredAuth } from "../src/types.js";
 
 describe("protocol / URL helpers", () => {
   it("正確清理 URL 尾端斜線", () => {
@@ -37,23 +39,60 @@ describe("protocol / URL helpers", () => {
   });
 });
 
-describe("protocol / parseLoginInput", () => {
+describe("protocol / parseCompositeKey", () => {
   it("正確解析空白隔開的 URL 與 Key", () => {
-    const res = parseLoginInput("https://litellm.internal sk-123456");
-    expect(res.baseURL).toBe("https://litellm.internal");
-    expect(res.apiKey).toBe("sk-123456");
+    expect(parseCompositeKey("https://litellm.internal sk-123456")).toEqual({
+      baseURL: "https://litellm.internal",
+      apiKey: "sk-123456",
+    });
   });
 
   it("正確解析逗號隔開的 URL 與 Key", () => {
-    const res = parseLoginInput("https://litellm.internal,sk-123456");
-    expect(res.baseURL).toBe("https://litellm.internal");
-    expect(res.apiKey).toBe("sk-123456");
+    expect(parseCompositeKey("https://litellm.internal,sk-123456")).toEqual({
+      baseURL: "https://litellm.internal",
+      apiKey: "sk-123456",
+    });
   });
 
-  it("只輸入 Key 時使用預設 Base URL", () => {
-    const res = parseLoginInput("sk-123456");
-    expect(res.baseURL).toBe("http://127.0.0.1:4000");
-    expect(res.apiKey).toBe("sk-123456");
+  it("單純的 Key 不是複合格式，回傳 undefined", () => {
+    expect(parseCompositeKey("sk-123456")).toBeUndefined();
+  });
+
+  it("key 中段含 http 字樣但不以 URL 開頭時，不視為複合格式", () => {
+    expect(parseCompositeKey("sk-http-abc")).toBeUndefined();
+  });
+});
+
+describe("protocol / resolveConnection 優先序", () => {
+  /** 建立測試用的已儲存帳號（metadata.baseURL 為登入時的 Base URL 輸入） */
+  const account = (key: string, baseURL?: string): MagpieStoredAuth => ({
+    type: "api",
+    key,
+    metadata: baseURL === undefined ? undefined : { baseURL },
+  });
+
+  // 第三個參數傳空字串代表「環境變數未設定」：預設參數只在 undefined 時才讀取 process.env，測試不受外部環境影響
+  it.each([
+    [
+      "複合 key 的 URL 勝過 metadata、環境變數與預設值",
+      account("http://composite:4000 sk-x", "http://meta:4000"),
+      "http://env:4000",
+      "http://composite:4000",
+    ],
+    ["metadata 勝過環境變數", account("sk-plain", "http://meta:4000"), "http://env:4000", "http://meta:4000"],
+    ["環境變數勝過預設值", account("sk-plain"), "http://env:4000", "http://env:4000"],
+    ["三者皆無時使用預設值", account("sk-plain"), "", DEFAULT_BASE_URL],
+    ["metadata 空白視為未設定，改用環境變數", account("sk-plain", "   "), "http://env:4000", "http://env:4000"],
+    ["環境變數空白視為未設定，改用預設值", account("sk-plain", ""), "  ", DEFAULT_BASE_URL],
+  ])("%s", (_name, auth, env, expected) => {
+    expect(resolveConnection(auth, env).baseURL).toBe(expected);
+  });
+
+  it("沒有複合格式時 key 只去除前後空白，即使含有 http 字樣也不拆解", () => {
+    expect(resolveConnection(account("  sk-http-abc  ", "http://m:4000/v1/"), "")).toEqual({
+      baseURL: "http://m:4000/v1",
+      apiKey: "sk-http-abc",
+    });
   });
 });
 
