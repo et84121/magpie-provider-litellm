@@ -184,9 +184,8 @@ CI 使用 Bun 1.4.5（見 `.github/workflows`）。
 - **`LITELLM_BASE_URL` 與複合 key 格式**：由程式碼與單元測試涵蓋，未在 Magpie 中實際操作。
 - **401 判定規則調整（`auth_error` 不再單獨判定 expired、新增 `blocked` 字樣）**：上表的 wire 測試早於此調整，新規則只由 `tests/sign-in.test.ts` 與 `tests/fetch-interceptor.test.ts` 涵蓋。
 - **401 後 Magpie 帳號的實際狀態變化**（換號、標記需重新登入）：只驗證了外掛送出的標頭。
-- **Bun 1.4.5**：本機未安裝（npm 發佈年齡限制，且沒有已核准的取得路線），以 Bun 1.4.4 執行 install、check、lint、fmt、test。CI 的 1.4.5 未在本機重現。
 
 ### 已知的執行環境差異
 
-- Bun 1.3.x 上先讀 `res.body` 再 `clone()` 會讓已整包收到的 401 內文變空；外掛改為先 `clone()` 再讀，本機 Bun 1.3.14 與 1.4.4 的單元測試皆確認內文完整。OpenCode 內嵌的 Bun 版本仍未實測。
+- Bun 1.3.x 上先讀 `res.body` 再 `clone()` 會讓已整包收到的 401 內文變空；外掛改為先 `clone()` 再讀，本機 Bun 1.3.14、1.4.4 與 1.4.5 的單元測試皆確認內文完整。OpenCode 內嵌的 Bun 版本仍未實測。
 - 外掛使用 `Bun.file`、`Bun.write`（`src/limits.ts`），因此只能在 Bun 下執行。
