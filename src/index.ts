@@ -4,17 +4,56 @@
  * 支援原生協定路由、動態模型探索、用量預算監控與雙重認證標頭補全。
  */
 
+import { readBoundedText } from "./bounded-body.js";
 import { queryLiteLLMBudget } from "./budget.js";
 import { discoverModels } from "./discovery.js";
 import { loadCatalog } from "./limits.js";
 import { getApiBase, getManagementBase, resolveConnection } from "./protocol.js";
 import { enrichRateLimitResponse } from "./rate-limit.js";
+import { classifyUnauthorized, SIGN_IN_HEADER, signInStateFor } from "./sign-in.js";
 import { createTimeoutSignal } from "./timeout.js";
 import { type MagpieStoredAuth, type MagpieUsageResponse, ModelProtocolPackage } from "./types.js";
 
 export const PROVIDER_ID = "litellm";
 const CATALOG_CACHE_PATH = `${process.env.HOME ?? "."}/.cache/magpie-provider-litellm/models-dev.json`;
 const DEFAULT_TIMEOUT_MS = 10000;
+
+/**
+ * 取出請求的 URL 字串，支援 Request、URL 與字串三種輸入
+ * @private
+ */
+function requestUrl(input: RequestInfo | URL): string {
+  if (input instanceof Request) return input.url;
+  if (input instanceof URL) return input.href;
+  return input;
+}
+
+/**
+ * 判斷 URL 的路徑是否含 messages 片段（/v1/messages、/v1/messages/count_tokens），以路徑段比對而非子字串。
+ * 無法解析的 URL 視為非 Messages 端點。
+ * @private
+ */
+function isAnthropicMessagesUrl(url: string): boolean {
+  let pathname: string;
+  try {
+    pathname = new URL(url).pathname;
+  } catch {
+    return false;
+  }
+  return pathname.split("/").includes("messages");
+}
+
+/**
+ * 為 401 回應加上 X-Magpie-Sign-In：只有確認的 key 失效才標 expired，其餘 kept，避免健康帳號被誤標。
+ * 內文只做有界讀取，原回應 body 保持可讀，回傳的 Response 內容與狀態不變。
+ * @private
+ */
+async function withSignInState(res: Response): Promise<Response> {
+  const state = signInStateFor(classifyUnauthorized(await readBoundedText(res)));
+  const headers = new Headers(res.headers);
+  headers.set(SIGN_IN_HEADER, state);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
 
 /**
  * Magpie LiteLLM 外掛主函式
@@ -106,7 +145,9 @@ export const LitellmPlugin = async () => ({
         baseURL: getApiBase(connection.baseURL),
         apiKey,
         async fetch(input: RequestInfo | URL, init?: RequestInit) {
-          const headers = new Headers(init?.headers);
+          // Request 的標頭先保留，init 的標頭疊在上面，再補上認證與來源標頭
+          const headers = new Headers(input instanceof Request ? input.headers : undefined);
+          new Headers(init?.headers).forEach((value, name) => headers.set(name, value));
 
           if (apiKey) {
             headers.set("authorization", `Bearer ${apiKey}`);
@@ -114,26 +155,12 @@ export const LitellmPlugin = async () => ({
           }
           headers.set("x-litellm-source", "magpie");
 
-          const urlString = input.toString();
-          if (urlString.includes("/messages") && !headers.has("anthropic-version")) {
+          if (isAnthropicMessagesUrl(requestUrl(input)) && !headers.has("anthropic-version")) {
             headers.set("anthropic-version", "2023-06-01");
           }
 
           const res = await fetch(input, { ...init, headers });
-
-          if (res.status === 401) {
-            const clone = res.clone();
-            const text = await clone.text().catch(() => "");
-            const isModelSpecific = text.includes("model_not_found") || text.includes("not available");
-            const newHeaders = new Headers(res.headers);
-            newHeaders.set("X-Magpie-Sign-In", isModelSpecific ? "kept" : "expired");
-            return new Response(res.body, {
-              status: res.status,
-              statusText: res.statusText,
-              headers: newHeaders,
-            });
-          }
-
+          if (res.status === 401) return withSignInState(res);
           return enrichRateLimitResponse(res);
         },
       };
