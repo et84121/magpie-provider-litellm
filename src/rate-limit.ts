@@ -8,6 +8,7 @@
  */
 
 import { readBoundedText } from "./bounded-body.js";
+import { isRecord, parseJsonRecord } from "./json.js";
 
 const HTTP_TOO_MANY_REQUESTS = 429;
 const HEADER_RATE_LIMIT_TYPE = "rate_limit_type";
@@ -85,27 +86,6 @@ const DIMENSION_LABEL: Record<RateLimitDimension, string> = {
   [RateLimitDimension.CONCURRENT]: "並行請求數",
   [RateLimitDimension.TOKEN_RATE]: "Token 吞吐量",
 };
-
-/**
- * 判斷值是否為普通 JSON 物件（排除 null 與陣列）
- * @private
- */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * 解析 JSON 物件內文，失敗或頂層不是物件時回傳 undefined
- * @private
- */
-function parseJsonRecord(text: string): Record<string, unknown> | undefined {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    return isRecord(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * 讀取可用於補充提示的 429 內文；非 JSON、過大或過慢時，不阻擋原始回應。
