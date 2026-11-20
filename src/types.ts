@@ -44,23 +44,6 @@ export interface LiteLLMModelInfoEntry {
 }
 
 /**
- * LiteLLM /key/info 回傳結構
- * 規格出處：https://docs.litellm.ai/docs/proxy/users_and_keys
- */
-export interface LiteLLMKeyInfoResponse {
-  key?: string;
-  info?: {
-    key_name?: string;
-    user_id?: string;
-    team_id?: string;
-    spend?: number;
-    max_budget?: number;
-    budget_reset_at?: string;
-    models?: string[];
-  };
-}
-
-/**
  * Magpie 帳號認證儲存中繼資料
  */
 export interface MagpieAuthMetadata {
