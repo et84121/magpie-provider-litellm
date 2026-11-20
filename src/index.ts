@@ -6,7 +6,6 @@
 
 import { queryLiteLLMBudget } from "./budget.js";
 import {
-  cleanUrl,
   getApiBase,
   getManagementBase,
   isDecisionModel,
@@ -22,7 +21,6 @@ import {
 import { loadCatalog, lookupLimit, type ModelsDevCatalog } from "./limits.js";
 import { enrichRateLimitResponse } from "./rate-limit.js";
 import {
-  type LiteLLMKeyInfoResponse,
   type LiteLLMModelInfoEntry,
   type MagpieStoredAuth,
   type MagpieUsageResponse,

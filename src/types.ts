@@ -38,6 +38,8 @@ export interface LiteLLMModelInfoEntry {
     supports_function_calling?: boolean;
     supports_vision?: boolean;
     supports_reasoning?: boolean;
+    // 外部資料，型別保守為 unknown；消費端以 Array.isArray 與 typeof 判斷元素
+    supported_endpoints?: unknown[];
   };
 }
 
