@@ -35,7 +35,7 @@ describe("LitellmPlugin / loader fetch", () => {
     try {
       const authData = {
         type: "api",
-        key: "sk-litellm-test-key",
+        key: "fake-test-api-key-not-a-secret",
         metadata: { baseURL: "http://localhost:4000" },
       };
       const loader = await plugin.auth.loader(async () => authData as any);
@@ -46,8 +46,8 @@ describe("LitellmPlugin / loader fetch", () => {
         headers: { "Content-Type": "application/json" },
       });
 
-      expect(capturedHeaders?.get("authorization")).toBe("Bearer sk-litellm-test-key");
-      expect(capturedHeaders?.get("x-api-key")).toBe("sk-litellm-test-key");
+      expect(capturedHeaders?.get("authorization")).toBe("Bearer fake-test-api-key-not-a-secret");
+      expect(capturedHeaders?.get("x-api-key")).toBe("fake-test-api-key-not-a-secret");
       expect(capturedHeaders?.get("x-litellm-source")).toBe("magpie");
       expect(capturedHeaders?.get("anthropic-version")).toBe("2023-06-01");
     } finally {
@@ -69,7 +69,7 @@ describe("LitellmPlugin / loader fetch", () => {
     try {
       const authData = {
         type: "api",
-        key: "sk-litellm-test-key",
+        key: "fake-test-api-key-not-a-secret",
         metadata: { baseURL: "http://localhost:4000" },
       };
       const loader = await plugin.auth.loader(async () => authData as any);
