@@ -26,11 +26,6 @@ describe("limits / lookupLimit", () => {
     expect(lookupLimit(catalog, "azure_ai/unknown-model")).toBeUndefined();
   });
 
-  it("沒有 output 的條目視為無效", () => {
-    const partial: ModelsDevCatalog = { azure: { models: { x: { limit: { context: 10 } } } } };
-    expect(lookupLimit(partial, "azure_ai/x")).toBeUndefined();
-  });
-
   it("候選順序：azure_ai 先查 azure，再查 anthropic", () => {
     const c = candidateLookups("azure_ai/claude-opus-5");
     expect(c[0]).toEqual({ provider: "azure", id: "claude-opus-5" });
@@ -125,5 +120,142 @@ describe("limits / loadCatalog cache", () => {
     const path = join(blocker, "c.json");
     const got = await loadCatalog(path, async () => new Response(JSON.stringify(payload)));
     expect(got).toEqual(payload);
+  });
+});
+
+describe("limits / loadCatalog 快取驗證與投影", () => {
+  const dir = () => mkdtempSync(join(tmpdir(), "limits-"));
+  const payload = { anthropic: { models: { "claude-x": { limit: { context: 1, output: 2 } } } } };
+  const fresh = () => 1000;
+
+  it("新鮮但形狀損毀的快取會重新下載，不採用損毀內容", async () => {
+    const path = join(dir(), "c.json");
+    await Bun.write(path, JSON.stringify({ fetchedAt: 1000, catalog: { anthropic: "損毀" } }));
+    let calls = 0;
+    const got = await loadCatalog(
+      path,
+      async () => {
+        calls += 1;
+        return new Response(JSON.stringify(payload));
+      },
+      fresh,
+    );
+    expect(calls).toBe(1);
+    expect(got).toEqual(payload);
+  });
+
+  it("時間戳在未來（時鐘倒退）視為不新鮮，重新下載", async () => {
+    const path = join(dir(), "c.json");
+    await Bun.write(path, JSON.stringify({ fetchedAt: 5000, catalog: {} }));
+    const got = await loadCatalog(
+      path,
+      async () => new Response(JSON.stringify(payload)),
+      () => 1000,
+    );
+    expect(got).toEqual(payload);
+  });
+
+  it("下載內容形狀不合（無任何官方來源）時保留既有有效快取，不覆寫", async () => {
+    const path = join(dir(), "c.json");
+    const stale = JSON.stringify({ fetchedAt: 0, catalog: payload });
+    await Bun.write(path, stale);
+    const got = await loadCatalog(
+      path,
+      async () => new Response(JSON.stringify({ neon: { models: {} } })),
+      () => 25 * 60 * 60 * 1000,
+    );
+    expect(got).toEqual(payload);
+    expect(await Bun.file(path).text()).toBe(stale);
+  });
+
+  it("下載的非 JSON 內容視為失敗，保留既有快取", async () => {
+    const path = join(dir(), "c.json");
+    await Bun.write(path, JSON.stringify({ fetchedAt: 0, catalog: payload }));
+    const got = await loadCatalog(
+      path,
+      async () => new Response("<html>maintenance</html>"),
+      () => 25 * 60 * 60 * 1000,
+    );
+    expect(got).toEqual(payload);
+  });
+
+  it("寫回的快取只含官方來源與完整上限，不鏡像整份目錄", async () => {
+    const path = join(dir(), "c.json");
+    const big = {
+      anthropic: {
+        models: {
+          "claude-x": { limit: { context: 1, output: 2 }, name: "x", cost: { input: 3 } },
+          "claude-no-output": { limit: { context: 9 } },
+        },
+      },
+      neon: { models: { "claude-x": { limit: { context: 7, output: 8 } } } },
+    };
+    await loadCatalog(path, async () => new Response(JSON.stringify(big)), fresh);
+    const saved = await Bun.file(path).json();
+    expect(Object.keys(saved.catalog)).toEqual(["anthropic"]);
+    expect(saved.catalog.anthropic).toEqual({ models: { "claude-x": { limit: { context: 1, output: 2 } } } });
+  });
+
+  it("舊版完整目錄快取（含非官方來源與不合格條目）投影後仍可用，下載失敗時不遺失", async () => {
+    const legacy = {
+      fetchedAt: 0,
+      catalog: {
+        anthropic: {
+          id: "anthropic",
+          models: {
+            "claude-x": { id: "claude-x", limit: { context: 1, output: 2 }, cost: { input: 3 } },
+            broken: { limit: { context: 0, output: 5 } },
+            nolimit: { name: "n" },
+          },
+        },
+        neon: { models: {} },
+        odd: "not-an-object",
+      },
+    };
+    const expected = { anthropic: { models: { "claude-x": { limit: { context: 1, output: 2 } } } } };
+
+    const stalePath = join(dir(), "stale.json");
+    await Bun.write(stalePath, JSON.stringify(legacy));
+    const offline = async () => {
+      throw new Error("offline");
+    };
+    expect(await loadCatalog(stalePath, offline, () => 25 * 60 * 60 * 1000)).toEqual(expected);
+
+    const freshPath = join(dir(), "fresh.json");
+    await Bun.write(freshPath, JSON.stringify({ ...legacy, fetchedAt: 1000 }));
+    let calls = 0;
+    expect(
+      await loadCatalog(
+        freshPath,
+        async () => {
+          calls += 1;
+          return new Response("{}");
+        },
+        () => 1000,
+      ),
+    ).toEqual(expected);
+    expect(calls).toBe(0);
+  });
+
+  it("單一條目不合格只略過該條目，其餘條目仍可查", async () => {
+    const path = join(dir(), "none.json");
+    const got = await loadCatalog(
+      path,
+      async () =>
+        new Response(
+          JSON.stringify({
+            anthropic: {
+              models: {
+                bad: { limit: { context: -1, output: 2 } },
+                noOutput: { limit: { context: 2 } },
+                good: { limit: { context: 3, output: 4 } },
+              },
+            },
+          }),
+        ),
+      fresh,
+    );
+    expect(got).toEqual({ anthropic: { models: { good: { limit: { context: 3, output: 4 } } } } });
+    expect(lookupLimit(got!, "anthropic/noOutput")).toBeUndefined();
   });
 });
