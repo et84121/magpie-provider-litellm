@@ -26,7 +26,7 @@ Magpie 原生 LiteLLM Proxy Provider 外掛。
   - 有可用列 → 權威結果。即使全是非對話模型，也**不會**從 `/v1/models` 補回（避免把 embedding 誤當成對話模型）。
   - 兩個端點都不可用 → 保留 Magpie 既有的模型清單。
 - 非對話模型（`model_info.mode` 為 `embedding`、`image_generation`、`audio_transcription`、`audio_speech`、`ocr`、`realtime`、`rerank`、`moderation`、`extraction`、`completion`）會被略過；其他或缺漏的 mode 仍視為對話模型，不依模型名稱猜測。
-- 決策模型（`decides`）只認 `mode` 為 `evaluation`／`decisions`，或沒有 mode 時名稱為 `Decision-1`；有明確其他 mode 時不依名稱判定。
+- 決策模型（`decides`）只認 `mode` 為 `evaluation`／`decisions`，或沒有 mode 時名稱為 `Decision-1`；有明確其他 mode 時不依名稱判定。Magpie 會將這些模型列為路由群組的分類器，而非一般對話模型。分類請求直接轉送至 [LiteLLM 原生的 `POST /v1/systemone`](https://docs.litellm.ai/docs/decisions)，需使用支援該端點與模型的 LiteLLM 版本。
 - **Wire model ID 一律是 LiteLLM 的 `model_name`**：呼叫與 key／team 的 models 白名單都比對它。`litellm_params.model`（上游部署名）只用來查外部上限與目錄，**不會送上 proxy**。
 - 上限來源：LiteLLM 明確數值優先；缺值時查 models.dev 目錄；仍缺輸出上限時使用保底值 4096，並在終端機警告。
 - models.dev 目錄快取於 `~/.cache/magpie-provider-litellm/models-dev.json`，TTL 24 小時。快取損毀或形狀不合會重新下載；下載失敗時保留既有有效快取（即使已過期），不覆寫。
