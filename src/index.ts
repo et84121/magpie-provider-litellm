@@ -66,6 +66,8 @@ export const LitellmPlugin = async () => ({
       name: "LiteLLM",
       npm: ModelProtocolPackage.OPENAI_COMPATIBLE,
       api: "http://127.0.0.1:4000/v1",
+      // Magpie 只在供應商啟用決策 API 時採用模型的 decides 標記。
+      decide: true,
       models: {
         "claude-3-7-sonnet": {
           name: "Claude 3.7 Sonnet (Native Messages)",

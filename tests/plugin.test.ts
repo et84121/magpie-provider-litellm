@@ -14,6 +14,7 @@ describe("LitellmPlugin / config", () => {
 
     expect(configObj.provider[PROVIDER_ID]).toBeDefined();
     expect(configObj.provider[PROVIDER_ID].name).toBe("LiteLLM");
+    expect(configObj.provider[PROVIDER_ID].decide).toBe(true);
     expect(configObj.provider[PROVIDER_ID].models["claude-3-7-sonnet"].provider.npm).toBe(
       ModelProtocolPackage.ANTHROPIC,
     );
