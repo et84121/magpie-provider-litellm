@@ -42,7 +42,7 @@ export interface DiscoveredModel {
     toolcall: boolean;
     reasoning: boolean;
     attachment: boolean;
-    input: { text: true; image: boolean };
+    input: { text: true; image: boolean; audio: boolean };
   };
   cost?: { input: number; output: number; cache: { read: number; write: number } };
 }
@@ -207,8 +207,12 @@ function assemble(entry: LiteLLMModelInfoEntry, apiBase: string, external?: Mode
     capabilities: {
       toolcall: !isDecision && info.supports_function_calling !== false,
       reasoning: !isDecision && resolveReasoning(id, entry),
-      attachment: !isDecision && (info.supports_vision === true || info.supports_pdf_input === true),
-      input: { text: true, image: !isDecision && info.supports_vision === true },
+      attachment: info.supports_vision === true || info.supports_pdf_input === true,
+      input: {
+        text: true,
+        image: info.supports_vision === true,
+        audio: info.supports_audio_input === true,
+      },
     },
     ...(cost ? { cost } : {}),
   };

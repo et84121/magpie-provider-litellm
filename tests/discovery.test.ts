@@ -293,6 +293,33 @@ describe("discovery / 路由與決策模型", () => {
     expect(decision.decides).toBe(true);
     expect(decision.capabilities.toolcall).toBe(false);
     expect(decision.capabilities.reasoning).toBe(false);
+    expect(decision.capabilities.input).toEqual({ text: true, image: false, audio: false });
+  });
+
+  it("決策模型保留 supports_vision 與 supports_audio_input 的輸入能力，僅關閉 toolcall 與 reasoning", async () => {
+    const gw = fakeGateway({
+      "/model/info": () =>
+        json({
+          data: [
+            {
+              model_name: "gemini-decision-1",
+              model_info: {
+                mode: "decisions",
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_vision: true,
+                supports_audio_input: true,
+              },
+            },
+          ],
+        }),
+    });
+    const decision = (await discover(gw.base))!["gemini-decision-1"];
+    expect(decision.decides).toBe(true);
+    expect(decision.capabilities.toolcall).toBe(false);
+    expect(decision.capabilities.reasoning).toBe(false);
+    expect(decision.capabilities.attachment).toBe(true);
+    expect(decision.capabilities.input).toEqual({ text: true, image: true, audio: true });
   });
 
   it("明確的 supports_reasoning 優先於名稱推論（含 false）", async () => {
