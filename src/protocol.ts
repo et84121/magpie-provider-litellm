@@ -115,10 +115,19 @@ export function isDecisionModel(modelId: string, item?: LiteLLMModelInfoEntry): 
 
 /**
  * 判斷是否為應排除的非對話模型（如 embedding、圖片生成、語音、rerank 等）。
- * 只看 model_info.mode 這個明確證據，不看模型名稱。
+ * `completion` 一般視為非對話模式；但 LiteLLM 明確標示 Anthropic provider 與 function calling 時，保留該模型供 Anthropic Messages 使用。
  */
 export function isExcludedModel(item?: LiteLLMModelInfoEntry): boolean {
-  const mode = (item?.model_info?.mode || "").toLowerCase();
+  const info = item?.model_info;
+  const mode = (info?.mode || "").toLowerCase();
+  if (
+    mode === "completion" &&
+    info?.litellm_provider?.toLowerCase() === "anthropic" &&
+    info.supports_function_calling === true
+  ) {
+    return false;
+  }
+
   return NON_CHAT_MODES.has(mode);
 }
 
