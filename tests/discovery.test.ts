@@ -267,6 +267,42 @@ describe("discovery / 路由與決策模型", () => {
     expect(gw.seen.map((s) => s.path)).toEqual(["/model/info"]);
   });
 
+  it("completion mode 有 Anthropic Messages 能力證據時保留模型，但不放寬其他 completion 排除", async () => {
+    const gw = fakeGateway({
+      "/model/info": () =>
+        json({
+          data: [
+            {
+              model_name: "claude-haiku-5-5",
+              litellm_params: { custom_llm_provider: "azure_ai" },
+              model_info: {
+                mode: "completion",
+                litellm_provider: "anthropic",
+                supports_function_calling: true,
+              },
+            },
+            { model_name: "legacy-completion", model_info: { mode: "completion" } },
+            {
+              model_name: "non-anthropic-tools",
+              model_info: { mode: "completion", litellm_provider: "openai", supports_function_calling: true },
+            },
+            {
+              model_name: "anthropic-without-tools",
+              model_info: { mode: "completion", litellm_provider: "anthropic" },
+            },
+            { model_name: "embedding", model_info: { mode: "embedding" } },
+          ],
+        }),
+      "/v1/models": () => json({ data: [{ id: "must-not-be-added" }] }),
+    });
+
+    const models = (await discover(gw.base))!;
+    expect(Object.keys(models)).toEqual(["claude-haiku-5-5"]);
+    expect(models["claude-haiku-5-5"].api.npm).toBe(ModelProtocolPackage.ANTHROPIC);
+    expect(models["claude-haiku-5-5"].capabilities.toolcall).toBe(true);
+    expect(gw.seen.map((request) => request.path)).toEqual(["/model/info"]);
+  });
+
   it("語音、OCR、realtime、rerank 等明確非對話 mode 同樣略過；未列入的 mode 不靠猜測排除", async () => {
     const gw = fakeGateway({
       "/model/info": () =>
