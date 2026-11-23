@@ -41,6 +41,7 @@ const ModelInfoMetaSchema = z.object({
   supports_function_calling: optionalBoolean,
   supports_vision: optionalBoolean,
   supports_pdf_input: optionalBoolean,
+  supports_audio_input: optionalBoolean,
   supports_reasoning: optionalBoolean,
   supported_endpoints: z.array(z.unknown()).nullish().catch(undefined),
 });
